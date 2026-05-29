@@ -1,295 +1,142 @@
-'use client'
+"use client";
 
-import { useMemo } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
-import type { PriceLevel } from '../lib/types'
+import { useMemo } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import type { OrderLevel } from "../hooks/useOrderbook";
 
 interface OrderbookProps {
-  bids: PriceLevel[]
-  asks: PriceLevel[]
-  bestBid: number | null
-  bestAsk: number | null
-  bidDir: 'up' | 'down' | null
-  askDir: 'up' | 'down' | null
-  market?: string
+  bids: OrderLevel[];
+  asks: OrderLevel[];
+  bestBid: number | null;
+  bestAsk: number | null;
+  bidDir: "up" | "down" | null;
+  askDir: "up" | "down" | null;
+  market?: string;
 }
 
-const ROW_COUNT = 14
+const ROW_COUNT = 16;
 
-// Fixed-width number formatter — always same character count so columns don't jump
-function fmtPrice(p: number, decimals = 1) {
-  return p.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
-}
-function fmtQty(q: number) {
-  return q.toFixed(3)
-}
-function fmtTotal(p: number, q: number) {
-  const v = p * q
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`
-  if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`
-  return v.toFixed(0)
-}
-
-export default function Orderbook({ bids, asks, bestBid, bestAsk, bidDir, askDir, market = 'BTC-PERP' }: OrderbookProps) {
+export default function Orderbook({ bids, asks, bestBid, bestAsk, bidDir, askDir, market }: OrderbookProps) {
   const topAsks = useMemo(
     () => [...asks].sort((a, b) => a.price - b.price).slice(0, ROW_COUNT).reverse(),
-    [asks],
-  )
+    [asks]
+  );
   const topBids = useMemo(
     () => [...bids].sort((a, b) => b.price - a.price).slice(0, ROW_COUNT),
-    [bids],
-  )
+    [bids]
+  );
 
-  // Cumulative totals for depth bar
-  const asksWithDepth = useMemo(() => {
-    let cum = 0
-    return [...topAsks].reverse().map(l => { cum += l.qty; return { ...l, cum } }).reverse()
-  }, [topAsks])
+  const maxAskQty = useMemo(() => Math.max(...topAsks.map((a) => a.qty), 1), [topAsks]);
+  const maxBidQty = useMemo(() => Math.max(...topBids.map((b) => b.qty), 1), [topBids]);
 
-  const bidsWithDepth = useMemo(() => {
-    let cum = 0
-    return topBids.map(l => { cum += l.qty; return { ...l, cum } })
-  }, [topBids])
-
-  const maxAskCum = asksWithDepth[asksWithDepth.length - 1]?.cum ?? 1
-  const maxBidCum = bidsWithDepth[bidsWithDepth.length - 1]?.cum ?? 1
-
-  const spread = bestBid != null && bestAsk != null ? bestAsk - bestBid : null
-  const spreadPct = spread != null && bestAsk ? ((spread / bestAsk) * 100).toFixed(3) : null
-  const midPrice = bestBid != null && bestAsk != null ? (bestBid + bestAsk) / 2 : null
+  const spread = bestBid && bestAsk ? bestAsk - bestBid : null;
+  const spreadPct =
+    bestAsk && bestBid ? (((bestAsk - bestBid) / bestAsk) * 100).toFixed(3) : null;
 
   return (
-    <div style={{
-      background: 'var(--panel)',
-      border: '1px solid var(--border)',
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      overflow: 'hidden',
-    }}>
-      {/* ── Header ── */}
-      <div style={{
-        padding: '7px 10px 6px',
-        borderBottom: '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexShrink: 0,
-      }}>
-        <span style={{ fontSize: '9px', fontWeight: 700, letterSpacing: '0.12em', color: 'var(--text-dim)', textTransform: 'uppercase' }}>
-          Order Book
+    <div style={{ background: "var(--panel)", border: "1px solid var(--border)", display: "flex", flexDirection: "column", height: "100%", minHeight: 0, overflow: "hidden" }}>
+      {/* Header */}
+      <div style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+        <span style={{ fontSize: "9px", fontWeight: 600, letterSpacing: "0.1em", color: "var(--text-dim)", textTransform: "uppercase" }}>
+          {market ?? "BTC-PERP"} Book
         </span>
-        {spread != null && (
-          <span style={{ fontSize: '8.5px', color: 'var(--gold)', letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums' }}>
-            Spread {spread.toFixed(1)} <span style={{ opacity: 0.6 }}>({spreadPct}%)</span>
+        {spread !== null && (
+          <span style={{ fontSize: "9px", color: "var(--gold)", fontWeight: 300 }}>
+            Spread {spread} ({spreadPct}%)
           </span>
         )}
       </div>
 
-      {/* ── Column headers ── */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '44% 28% 28%',
-        padding: '3px 10px',
-        fontSize: '8px',
-        fontWeight: 700,
-        letterSpacing: '0.08em',
-        color: 'var(--text-dim)',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
-        flexShrink: 0,
-        textTransform: 'uppercase',
-      }}>
+      {/* Column headers */}
+      <div style={{ display: "grid", gridTemplateColumns: "40% 28% 32%", padding: "4px 10px", fontSize: "9px", fontWeight: 600, letterSpacing: "0.06em", color: "var(--text-dim)", borderBottom: "1px solid var(--border)", flexShrink: 0, textTransform: "uppercase" }}>
         <span>Price</span>
-        <span style={{ textAlign: 'right' }}>Size</span>
-        <span style={{ textAlign: 'right' }}>Total</span>
+        <span style={{ textAlign: "right" }}>Size</span>
+        <span style={{ textAlign: "right" }}>Total</span>
       </div>
 
-      {/* ── ASKS (sell side) — best ask at bottom ── */}
-      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', minHeight: 0 }}>
+      {/* ASKS — scroll independently */}
+      <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", justifyContent: "flex-end", minHeight: 0 }}>
         <AnimatePresence initial={false}>
-          {asksWithDepth.map(level => (
+          {topAsks.map((level) => (
             <BookRow
+              // FIX: prefix with side to guarantee uniqueness across bid/ask keys
               key={`ask-${level.price}`}
               level={level}
-              maxCum={maxAskCum}
+              maxQty={maxAskQty}
               side="ask"
-              fmtPrice={fmtPrice}
-              fmtQty={fmtQty}
-              fmtTotal={fmtTotal}
             />
           ))}
         </AnimatePresence>
       </div>
 
-      {/* ── Spread / Mid price divider ── */}
-      <div style={{
-        padding: '5px 10px',
-        borderTop: '1px solid var(--border)',
-        borderBottom: '1px solid var(--border)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexShrink: 0,
-        background: 'rgba(0,0,0,0.25)',
-        gap: '4px',
-      }}>
-        {/* Best ask */}
+      {/* Spread divider */}
+      <div style={{ padding: "5px 10px", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, background: "rgba(0,0,0,0.2)" }}>
         <motion.span
-          key={`ba-${Math.round((bestAsk ?? 0) * 10)}`}
-          initial={{ color: 'var(--plasma)' }}
-          animate={{ color: 'var(--plasma)' }}
-          style={{
-            fontSize: '12px',
-            fontWeight: 700,
-            color: 'var(--plasma)',
-            letterSpacing: '-0.02em',
-            fontVariantNumeric: 'tabular-nums',
-            minWidth: 0,
-          }}
+          key={`ask-best-${bestAsk ?? 0}`}
+          animate={{ opacity: [0.5, 1] }}
+          transition={{ duration: 0.15 }}
+          style={{ fontSize: "13px", fontWeight: 600, color: "var(--plasma)", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}
         >
-          {bestAsk ? fmtPrice(bestAsk) : '—'}
-          {askDir === 'up' && <span style={{ fontSize: '8px', marginLeft: '3px', color: 'var(--acid)' }}>▲</span>}
-          {askDir === 'down' && <span style={{ fontSize: '8px', marginLeft: '3px', color: 'var(--plasma)' }}>▼</span>}
+          {bestAsk ? bestAsk.toLocaleString() : "—"}
         </motion.span>
-
-        {/* Mid */}
-        {midPrice != null && (
-          <span style={{ fontSize: '8px', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-            mid {fmtPrice(midPrice)}
-          </span>
-        )}
-
-        {/* Best bid */}
+        <span style={{ fontSize: "9px", color: "var(--text-dim)", fontWeight: 300 }}>
+          mid {bestBid && bestAsk ? Math.round((bestBid + bestAsk) / 2).toLocaleString() : "—"}
+        </span>
         <motion.span
-          key={`bb-${Math.round((bestBid ?? 0) * 10)}`}
-          initial={{ color: 'var(--acid)' }}
-          animate={{ color: 'var(--acid)' }}
-          style={{
-            fontSize: '12px',
-            fontWeight: 700,
-            color: 'var(--acid)',
-            letterSpacing: '-0.02em',
-            fontVariantNumeric: 'tabular-nums',
-            minWidth: 0,
-            textAlign: 'right',
-          }}
+          key={`bid-best-${bestBid ?? 0}`}
+          animate={{ opacity: [0.5, 1] }}
+          transition={{ duration: 0.15 }}
+          style={{ fontSize: "13px", fontWeight: 600, color: "var(--acid)", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}
         >
-          {bidDir === 'up' && <span style={{ fontSize: '8px', marginRight: '3px' }}>▲</span>}
-          {bidDir === 'down' && <span style={{ fontSize: '8px', marginRight: '3px', color: 'var(--plasma)' }}>▼</span>}
-          {bestBid ? fmtPrice(bestBid) : '—'}
+          {bestBid ? bestBid.toLocaleString() : "—"}
         </motion.span>
       </div>
 
-      {/* ── BIDS (buy side) ── */}
-      <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+      {/* BIDS — scroll independently */}
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
         <AnimatePresence initial={false}>
-          {bidsWithDepth.map(level => (
+          {topBids.map((level) => (
             <BookRow
               key={`bid-${level.price}`}
               level={level}
-              maxCum={maxBidCum}
+              maxQty={maxBidQty}
               side="bid"
-              fmtPrice={fmtPrice}
-              fmtQty={fmtQty}
-              fmtTotal={fmtTotal}
             />
           ))}
         </AnimatePresence>
       </div>
     </div>
-  )
+  );
 }
 
-// ─── Row ──────────────────────────────────────────────────────────────────────
-
-function BookRow({
-  level,
-  maxCum,
-  side,
-  fmtPrice,
-  fmtQty,
-  fmtTotal,
-}: {
-  level: PriceLevel & { cum: number }
-  maxCum: number
-  side: 'bid' | 'ask'
-  fmtPrice: (p: number) => string
-  fmtQty: (q: number) => string
-  fmtTotal: (p: number, q: number) => string
-}) {
-  const depthPct = Math.min(100, (level.cum / maxCum) * 100)
-  const isBid = side === 'bid'
+function BookRow({ level, maxQty, side }: { level: OrderLevel; maxQty: number; side: "bid" | "ask" }) {
+  const pct = Math.min(100, (level.qty / maxQty) * 100);
+  const isBid = side === "bid";
 
   return (
     <motion.div
-      layout="position"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.12 }}
-      style={{
-        position: 'relative',
-        display: 'grid',
-        gridTemplateColumns: '44% 28% 28%',
-        padding: '0 10px',
-        height: '19px',
-        alignItems: 'center',
-        cursor: 'default',
-        userSelect: 'none',
-      }}
+      layout
+      initial={{ opacity: 0, x: isBid ? -8 : 8 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: isBid ? -8 : 8 }}
+      transition={{ duration: 0.15, ease: "easeOut" }}
+      style={{ position: "relative", display: "grid", gridTemplateColumns: "40% 28% 32%", padding: "0 10px", height: "20px", alignItems: "center", cursor: "default", userSelect: "none" }}
     >
-      {/* Depth bar — anchored right, cumulative */}
+      {/* Depth bar — use opacity animation NOT backgroundColor to avoid Framer Motion warning */}
       <motion.div
-        animate={{ width: `${depthPct}%` }}
-        transition={{ duration: 0.3, ease: 'easeOut' }}
-        style={{
-          position: 'absolute',
-          insetBlock: '1px',
-          right: 0,
-          background: isBid ? 'rgba(0,255,136,0.08)' : 'rgba(255,59,107,0.09)',
-          pointerEvents: 'none',
-        }}
+        animate={{ width: `${pct}%` }}
+        transition={{ duration: 0.25, ease: "easeOut" }}
+        style={{ position: "absolute", insetBlock: "1px", right: 0, opacity: 0.7, background: isBid ? "rgba(0,255,136,0.1)" : "rgba(255,59,107,0.12)", pointerEvents: "none" }}
       />
-
-      {/* Price */}
-      <span style={{
-        color: isBid ? 'var(--acid)' : 'var(--plasma)',
-        fontSize: '10.5px',
-        fontWeight: 400,
-        letterSpacing: '-0.01em',
-        position: 'relative',
-        zIndex: 1,
-        fontVariantNumeric: 'tabular-nums',
-      }}>
-        {fmtPrice(level.price)}
+      <span style={{ color: isBid ? "var(--acid)" : "var(--plasma)", fontSize: "11px", fontWeight: 300, letterSpacing: "-0.02em", position: "relative", zIndex: 1, fontVariantNumeric: "tabular-nums" }}>
+        {level.price.toLocaleString()}
       </span>
-
-      {/* Size */}
-      <span style={{
-        color: 'var(--text)',
-        fontSize: '10px',
-        fontWeight: 300,
-        textAlign: 'right',
-        position: 'relative',
-        zIndex: 1,
-        fontVariantNumeric: 'tabular-nums',
-        opacity: 0.85,
-      }}>
-        {fmtQty(level.qty)}
+      <span style={{ color: "var(--text)", fontSize: "10px", fontWeight: 300, textAlign: "right", position: "relative", zIndex: 1, fontVariantNumeric: "tabular-nums" }}>
+        {level.qty}
       </span>
-
-      {/* Total (notional) */}
-      <span style={{
-        color: 'var(--text-dim)',
-        fontSize: '9.5px',
-        fontWeight: 300,
-        textAlign: 'right',
-        position: 'relative',
-        zIndex: 1,
-        fontVariantNumeric: 'tabular-nums',
-      }}>
-        {fmtTotal(level.price, level.qty)}
+      <span style={{ color: "var(--text-dim)", fontSize: "9px", fontWeight: 300, textAlign: "right", position: "relative", zIndex: 1, fontVariantNumeric: "tabular-nums" }}>
+        {(level.price * level.qty).toLocaleString("en-US", { maximumFractionDigits: 0 })}
       </span>
     </motion.div>
-  )
+  );
 }

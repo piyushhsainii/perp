@@ -1,12 +1,13 @@
 import type {
-  OrderbookData,
   PlaceOrderRequest,
   PlaceOrderResponse,
   FundingData,
   Position,
 } from "./types";
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+const BASE = (
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080"
+).replace(/\/+$/, "");
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -15,52 +16,94 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error ?? "Request failed");
+    throw new Error((err as { error?: string }).error ?? "Request failed");
   }
-  return res.json();
+  return res.json() as Promise<T>;
 }
 
-// ─── Orders ───────────────────────────────────────────────────────────────────
-
-export function placeOrder(body: PlaceOrderRequest) {
-  // Backend expects qty as u32 — floor to nearest integer
-  return request<PlaceOrderResponse>("/order", {
-    method: "POST",
-    body: JSON.stringify({ ...body, qty: Math.max(1, Math.floor(body.qty)) }),
-  });
+// ── Orders ────────────────────────────────────────────────────────────────────
+export function placeOrder(body: PlaceOrderRequest & { market?: string }) {
+  // Pass market both in body AND as query param for maximum compatibility
+  const market = body.market ?? "BTC-PERP";
+  return request<PlaceOrderResponse>(
+    `/order?market=${encodeURIComponent(market)}`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+  );
 }
 
-export function cancelOrder(id: string, price: number, side: "Buy" | "Sell") {
-  return request<{ cancelled: boolean }>(`/order/${id}`, {
-    method: "DELETE",
-    body: JSON.stringify({ price, side }),
-  });
+export function cancelOrder(
+  id: string,
+  price: number,
+  side: "Buy" | "Sell",
+  market = "BTC-PERP",
+) {
+  return request<{ cancelled: boolean }>(
+    `/order/${id}?market=${encodeURIComponent(market)}`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ price, side }),
+    },
+  );
 }
 
-// ─── Orderbook ────────────────────────────────────────────────────────────────
-
-export function getOrderbook() {
-  return request<OrderbookData>("/orderbook");
+// ── Orderbook ─────────────────────────────────────────────────────────────────
+export function getOrderbook(market = "BTC-PERP") {
+  return request<{
+    symbol: string;
+    bids: { price: number; qty: number }[];
+    asks: { price: number; qty: number }[];
+    best_bid: number | null;
+    best_ask: number | null;
+    mark_price: number;
+    index_price: number;
+    funding_rate: number;
+  }>(`/orderbook?market=${encodeURIComponent(market)}`);
 }
 
-// ─── Positions ────────────────────────────────────────────────────────────────
-
-export function getPosition(userId: string) {
-  return request<Position>(`/position/${userId}`);
+// ── Positions ─────────────────────────────────────────────────────────────────
+export function getPosition(userId: string, market = "BTC-PERP") {
+  return request<Position>(
+    `/position/${userId}?market=${encodeURIComponent(market)}`,
+  );
 }
 
-// ─── Funding ──────────────────────────────────────────────────────────────────
-
-export function getFundingRate() {
-  return request<FundingData>("/funding-rate");
+// ── Funding ───────────────────────────────────────────────────────────────────
+export function getFundingRate(market = "BTC-PERP") {
+  return request<FundingData>(
+    `/funding-rate?market=${encodeURIComponent(market)}`,
+  );
 }
 
-// ─── Snapshots ────────────────────────────────────────────────────────────────
-
-export function saveSnapshot() {
-  return request<{ saved: boolean }>("/snapshot/save", { method: "POST" });
+// ── All mark prices (for multi-market ticker) ─────────────────────────────────
+export function getAllMarkPrices(): Promise<
+  Record<
+    string,
+    {
+      mark_price: number;
+      index_price: number;
+      funding_rate: number;
+      best_bid: number | null;
+      best_ask: number | null;
+    }
+  >
+> {
+  return request("/mark-price");
 }
 
-export function loadSnapshot() {
-  return request<{ loaded: boolean }>("/snapshot/load", { method: "POST" });
+// ── Snapshots ─────────────────────────────────────────────────────────────────
+export function saveSnapshot(market = "BTC-PERP") {
+  return request<{ saved: boolean }>(
+    `/snapshot/save?market=${encodeURIComponent(market)}`,
+    { method: "POST" },
+  );
+}
+
+export function loadSnapshot(market = "BTC-PERP") {
+  return request<{ loaded: boolean }>(
+    `/snapshot/load?market=${encodeURIComponent(market)}`,
+    { method: "POST" },
+  );
 }
