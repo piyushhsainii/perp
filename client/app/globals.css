@@ -1,0 +1,196 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --void: #080a0f;
+  --surface: #0d1117;
+  --panel: #0f1520;
+  --border: #1a2235;
+  --muted: #2a3650;
+  --text: #d1d9e6;
+  --text-dim: #566480;
+  --acid: #00ff88;
+  --acid-dim: rgba(0, 255, 136, 0.07);
+  --plasma: #ff3b6b;
+  --plasma-dim: rgba(255, 59, 107, 0.07);
+  --gold: #f0a500;
+  --ice: #38bdf8;
+  --font-poppins: "Poppins", sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+html {
+  /* enforce tracking-tight globally */
+  letter-spacing: -0.015em;
+}
+
+body {
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--font-poppins);
+  font-weight: 300;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--muted);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+/* Grid bg */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(26, 34, 53, 0.6) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(26, 34, 53, 0.6) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+/* Panels */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+.panel-header {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* Inputs */
+.input-field {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font-poppins);
+  font-size: 12px;
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  padding: 7px 10px;
+  border-radius: 4px;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+.input-field:focus {
+  border-color: var(--acid);
+}
+.input-field::placeholder {
+  color: var(--text-dim);
+}
+.input-field::-webkit-outer-spin-button,
+.input-field::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+/* Buttons */
+.btn-buy {
+  background: var(--acid);
+  color: #000;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 10px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  transition:
+    opacity 0.15s,
+    transform 0.1s;
+  width: 100%;
+  font-family: var(--font-poppins);
+}
+.btn-buy:hover {
+  opacity: 0.85;
+}
+.btn-buy:active {
+  transform: scale(0.98);
+}
+
+.btn-sell {
+  background: var(--plasma);
+  color: #fff;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  padding: 10px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  transition:
+    opacity 0.15s,
+    transform 0.1s;
+  width: 100%;
+  font-family: var(--font-poppins);
+}
+.btn-sell:hover {
+  opacity: 0.85;
+}
+.btn-sell:active {
+  transform: scale(0.98);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 9px;
+  font-weight: 300;
+  letter-spacing: 0.08em;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    color 0.15s;
+  font-family: var(--font-poppins);
+}
+.btn-ghost:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+
+/* Animations */
+@keyframes flashGreen {
+  0% {
+    background: rgba(0, 255, 136, 0.3);
+  }
+  100% {
+    background: transparent;
+  }
+}
+@keyframes flashRed {
+  0% {
+    background: rgba(255, 59, 107, 0.3);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.text-glow-acid {
+  text-shadow: 0 0 10px rgba(0, 255, 136, 0.5);
+}

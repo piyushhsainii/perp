@@ -47,6 +47,30 @@ async fn main() -> std::io::Result<()> {
     raw_ob.mark_price  = 65_000;
     raw_ob.index_price = 64_900;
 
+    use position::Side;
+
+    for i in 0..20 {
+        let offset = (i + 1) * 10;
+
+        // bids
+        raw_ob.create_order(
+            Uuid::new_v4(),
+            Side::Buy,
+            5 + (i as u32 * 2),
+            Some(65_000 - offset as u32),
+            0.0,
+        );
+
+        // asks
+        raw_ob.create_order(
+            Uuid::new_v4(),
+            Side::Sell,
+            5 + (i as u32 * 2),
+            Some(65_000 + offset as u32),
+            0.0,
+        );
+    }
+
     let orderbook = Arc::new(Mutex::new(raw_ob));
 
     let state = AppState {
