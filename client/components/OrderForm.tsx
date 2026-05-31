@@ -80,8 +80,8 @@ function SummaryRow({ label, hint, value, color }: {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function OrderForm({
-  markPrice, balance, onOrder, orderError, lastFlash,
-  market = 'BTC-PERP', walletConnected = false, onConnectWallet,
+  markPrice, balance, onOrder, orderError,
+  market = 'BTC-PERP',
 }: OrderFormProps) {
   const [side, setSide] = useState<'Buy' | 'Sell'>('Buy')
   const [orderType, setOrderType] = useState<'Market' | 'Limit'>('Market')
@@ -160,7 +160,6 @@ export default function OrderForm({
       background: 'var(--panel)',
       border: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column',
-      position: 'relative',
     }}>
       {/* ── Header ── */}
       <div style={{
@@ -466,46 +465,23 @@ export default function OrderForm({
           )}
         </AnimatePresence>
 
-        {/* ── Submit / Connect ── */}
-        {walletConnected ? (
-          <motion.button
-            onClick={handleSubmit}
-            whileTap={{ scale: 0.97 }}
-            style={{
-              padding: '10px', borderRadius: '4px', border: 'none',
-              cursor: 'pointer',
-              fontSize: '11px', fontWeight: 600,
-              fontFamily: 'var(--font-poppins)', letterSpacing: '0.06em',
-              background: isBuy ? 'var(--acid)' : 'var(--plasma)',
-              color: isBuy ? '#000' : '#fff',
-              boxShadow: isBuy ? '0 0 18px rgba(0,255,136,0.12)' : '0 0 18px rgba(255,59,107,0.12)',
-              transition: 'opacity 0.15s',
-            }}
-          >
-            {isBuy ? '▲ LONG' : '▼ SHORT'} {qty || '0'} @ {leverage}×
-          </motion.button>
-        ) : (
-          // ── Wallet not connected: replace submit with connect button ──
-          // Direct onClick → no overlay, no indirection, Phantom popup fires immediately
-          <button
-            onClick={onConnectWallet}
-            style={{
-              padding: '10px', borderRadius: '4px', border: 'none',
-              cursor: 'pointer',
-              fontSize: '11px', fontWeight: 600,
-              fontFamily: 'var(--font-poppins)', letterSpacing: '0.06em',
-              background: 'linear-gradient(135deg, #9945FF, #6C3EC2)',
-              color: '#fff',
-              boxShadow: '0 0 18px rgba(153,69,255,0.25)',
-              transition: 'opacity 0.15s',
-              width: '100%',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.opacity = '0.85' }}
-            onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
-          >
-            👻 Connect Phantom to Trade
-          </button>
-        )}
+        {/* ── Submit ── */}
+        <motion.button
+          onClick={handleSubmit}
+          whileTap={{ scale: 0.97 }}
+          style={{
+            padding: '10px', borderRadius: '4px', border: 'none',
+            cursor: 'pointer',
+            fontSize: '11px', fontWeight: 600,
+            fontFamily: 'var(--font-poppins)', letterSpacing: '0.06em',
+            background: isBuy ? 'var(--acid)' : 'var(--plasma)',
+            color: isBuy ? '#000' : '#fff',
+            boxShadow: isBuy ? '0 0 18px rgba(0,255,136,0.12)' : '0 0 18px rgba(255,59,107,0.12)',
+            transition: 'opacity 0.15s',
+          }}
+        >
+          {isBuy ? '▲ LONG' : '▼ SHORT'} {qty || '0'} @ {leverage}×
+        </motion.button>
       </div>
     </div>
   )

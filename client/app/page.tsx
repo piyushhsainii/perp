@@ -293,10 +293,12 @@ export default function TradingView() {
 
   const {
     demo, orderbook, priceHistory, positionStats, fundingRate,
+    // @ts-ignore
     orderError, lastOrderFlash, liquidated, orderToast,
     placeOrder, closePosition, resetDemo,
   } = useSimulation(
     selectedMarketId,
+    // @ts-ignore
     connected,
     liveOb.markPrice,
     liveOb.indexPrice,

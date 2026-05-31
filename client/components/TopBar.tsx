@@ -156,40 +156,7 @@ export default function TopBar({
             {connected ? 'Live' : 'Sim'}
           </div>
 
-          {/* Phantom wallet button */}
-          {wallet?.connected ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '5px',
-                background: 'rgba(153,69,255,0.12)',
-                border: '1px solid rgba(153,69,255,0.3)',
-                borderRadius: '5px', padding: '4px 8px',
-              }}>
-                <span style={{ fontSize: '10px' }}>👻</span>
-                <span style={{ fontSize: '9px', fontWeight: 400, color: '#B57BFF', letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums' }}>
-                  {wallet.shortAddress}
-                </span>
-              </div>
-              <GhostButton onClick={wallet.disconnect}>Disconnect</GhostButton>
-            </div>
-          ) : (
-            <button
-              onClick={wallet.connect}
-              disabled={wallet.connecting}
-              style={{
-                padding: '5px 12px',
-                background: wallet.connecting ? 'rgba(153,69,255,0.2)' : 'linear-gradient(135deg, #9945FF, #6C3EC2)',
-                border: 'none', borderRadius: '5px',
-                color: '#fff', fontSize: '9px', fontWeight: 600,
-                fontFamily: 'var(--font-poppins)', letterSpacing: '0.06em',
-                cursor: wallet.connecting ? 'wait' : 'pointer',
-                boxShadow: '0 0 14px rgba(153,69,255,0.25)',
-                transition: 'opacity 0.15s', whiteSpace: 'nowrap',
-              }}
-            >
-              {wallet.connecting ? 'Connecting…' : '👻 Connect Wallet'}
-            </button>
-          )}
+         
         </div>
       </div>
 
