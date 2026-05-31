@@ -27,10 +27,11 @@ export interface UseOrderbookReturn {
   askDir: PriceDir;
 }
 
-// ─── CRITICAL FIX: full path in URL, not just the base ────────────────────────
+// No query params — Rust handler only accepts plain /ws/orderbook
 const WS_BASE = (
   process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080"
-).replace(/\/+$/, ""); // strip trailing slash
+).replace(/\/+$/, "");
+const WS_URL = `${WS_BASE}/ws/orderbook`;
 
 const DEPTH = 16;
 const RECONNECT_MS = 3_000;
@@ -51,7 +52,7 @@ const EMPTY: OrderbookData = {
   best_ask: null,
 };
 
-export function useOrderbook(market = "BTC-PERP"): UseOrderbookReturn {
+export function useOrderbook(): UseOrderbookReturn {
   const [connected, setConnected] = useState(false);
   const [data, setData] = useState<OrderbookData>(EMPTY);
   const [bidDir, setBidDir] = useState<PriceDir>(null);
@@ -64,9 +65,7 @@ export function useOrderbook(market = "BTC-PERP"): UseOrderbookReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnCount = useRef(0);
   const reconnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Use a ref so connect() never closes over a stale value
-  const marketRef = useRef(market);
-  marketRef.current = market;
+  const unmounted = useRef(false);
 
   const publish = useCallback((extras: Partial<OrderbookData> = {}) => {
     const bids = withRunningTotal(
@@ -85,7 +84,6 @@ export function useOrderbook(market = "BTC-PERP"): UseOrderbookReturn {
     const best_bid = bids[0]?.price ?? null;
     const best_ask = asks[0]?.price ?? null;
 
-    // Direction flash
     if (
       best_bid !== null &&
       prevBestBid.current !== null &&
@@ -106,28 +104,26 @@ export function useOrderbook(market = "BTC-PERP"): UseOrderbookReturn {
     prevBestAsk.current = best_ask;
 
     setData({ bids, asks, best_bid, best_ask, ...extras });
-  }, []); // stable — no deps needed
+  }, []);
 
-  // ─── connect is STABLE — no deps that change ──────────────────────────────
-  // We read market from marketRef.current so we don't need market in deps
   const connect = useCallback(() => {
-    if (reconnCount.current >= MAX_RECONNECTS) return;
+    if (unmounted.current || reconnCount.current >= MAX_RECONNECTS) return;
 
-    // Close any existing connection first
     if (wsRef.current) {
-      wsRef.current.onclose = null; // prevent reconnect loop from old socket
+      wsRef.current.onclose = null;
       wsRef.current.close();
       wsRef.current = null;
     }
 
-    // ─── THE KEY FIX: append full path + market query param ───────────────
-    const url = `${WS_BASE}/ws/orderbook?market=${encodeURIComponent(marketRef.current)}`;
-    console.log(`[WS] connecting to ${url}`);
+    console.log(
+      `[WS] connecting to ${WS_URL} (attempt ${reconnCount.current + 1})`,
+    );
 
     let ws: WebSocket;
     try {
-      ws = new WebSocket(url);
-    } catch {
+      ws = new WebSocket(WS_URL);
+    } catch (e) {
+      console.error("[WS] failed to construct WebSocket:", e);
       reconnCount.current += 1;
       reconnTimer.current = setTimeout(connect, RECONNECT_MS);
       return;
@@ -135,17 +131,31 @@ export function useOrderbook(market = "BTC-PERP"): UseOrderbookReturn {
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log(`[WS] connected — market=${marketRef.current}`);
+      if (unmounted.current) {
+        ws.close();
+        return;
+      }
+      console.log("[WS] ✓ connected to", WS_URL);
       reconnCount.current = 0;
       setConnected(true);
     };
 
     ws.onmessage = (ev: MessageEvent) => {
+      if (unmounted.current) return;
       try {
         const msg = JSON.parse(ev.data as string);
+        console.log(
+          "[WS] message:",
+          msg.type,
+          "bids:",
+          msg.bids?.length,
+          "asks:",
+          msg.asks?.length,
+          "mark:",
+          msg.mark_price,
+        );
         if (msg.type !== "orderbook") return;
 
-        // Backend sends objects {price, qty} — NOT tuples
         bidsMap.current.clear();
         asksMap.current.clear();
         for (const b of msg.bids ?? [])
@@ -158,14 +168,15 @@ export function useOrderbook(market = "BTC-PERP"): UseOrderbookReturn {
           indexPrice: msg.index_price,
           fundingRate: msg.funding_rate,
         });
-      } catch {
-        // malformed — ignore
+      } catch (e) {
+        console.warn("[WS] malformed message:", e);
       }
     };
 
-    ws.onclose = () => {
-      console.log(
-        `[WS] closed — will retry in ${RECONNECT_MS}ms (attempt ${reconnCount.current + 1})`,
+    ws.onclose = (ev) => {
+      if (unmounted.current) return;
+      console.warn(
+        `[WS] closed (code=${ev.code}) — retry ${reconnCount.current + 1}/${MAX_RECONNECTS}`,
       );
       setConnected(false);
       bidsMap.current.clear();
@@ -179,32 +190,32 @@ export function useOrderbook(market = "BTC-PERP"): UseOrderbookReturn {
     };
 
     ws.onerror = (e) => {
-      console.warn("[WS] error", e);
-      ws.close(); // onclose handles retry
+      console.error("[WS] error:", e);
+      ws.close();
     };
-  }, [publish]); // publish is stable, so connect is stable
+  }, [publish]);
 
-  // ─── Mount once, reconnect on market change ───────────────────────────────
   useEffect(() => {
+    unmounted.current = false;
     reconnCount.current = 0;
     bidsMap.current.clear();
     asksMap.current.clear();
     setData(EMPTY);
 
-    // Small delay on market switch so cleanup settles
     const t = setTimeout(connect, 80);
 
     return () => {
+      unmounted.current = true;
       clearTimeout(t);
       if (reconnTimer.current) clearTimeout(reconnTimer.current);
       if (wsRef.current) {
-        wsRef.current.onclose = null; // prevent reconnect on unmount
+        wsRef.current.onclose = null;
         wsRef.current.close();
         wsRef.current = null;
       }
       setConnected(false);
     };
-  }, [connect, market]); // market change triggers reconnect to new channel
+  }, [connect]);
 
   return { data, connected, bidDir, askDir };
 }

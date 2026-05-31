@@ -249,7 +249,7 @@ export default function OrderForm({ markPrice, balance, onOrder, orderError, las
             value={qty}
             onChange={setQty}
             placeholder="1"
-            min="0.001"
+            min="1"
             step="1"
             suffix="CONT"
           />
@@ -257,7 +257,7 @@ export default function OrderForm({ markPrice, balance, onOrder, orderError, las
           <div style={{ display: 'flex', gap: '3px', marginTop: '5px' }}>
             {[25, 50, 75, 100].map(pct => {
               const maxQty = balance * leverage / fillPrice
-              const pctQty = (maxQty * pct / 100).toFixed(3)
+              const pctQty = Math.max(1, Math.round(maxQty * pct / 100)).toString()
               return (
                 <button key={pct} onClick={() => setQty(pctQty)} style={{
                   flex: 1, padding: '3px 0', fontSize: '8px',

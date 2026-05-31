@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use events::OrderbookEvent;
 use orderbook::{Match, Orderbook};
-use position::Position;
+use position::{Position, Side};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -47,28 +47,11 @@ async fn main() -> std::io::Result<()> {
     raw_ob.mark_price  = 65_000;
     raw_ob.index_price = 64_900;
 
-    use position::Side;
-
-    for i in 0..20 {
+    // Seed initial resting orders so book isn't empty
+    for i in 0..20u32 {
         let offset = (i + 1) * 10;
-
-        // bids
-        raw_ob.create_order(
-            Uuid::new_v4(),
-            Side::Buy,
-            5 + (i as u32 * 2),
-            Some(65_000 - offset as u32),
-            0.0,
-        );
-
-        // asks
-        raw_ob.create_order(
-            Uuid::new_v4(),
-            Side::Sell,
-            5 + (i as u32 * 2),
-            Some(65_000 + offset as u32),
-            0.0,
-        );
+        raw_ob.create_order(Uuid::new_v4(), Side::Buy,  5 + i * 2, Some(65_000 - offset), 0.0);
+        raw_ob.create_order(Uuid::new_v4(), Side::Sell, 5 + i * 2, Some(65_000 + offset), 0.0);
     }
 
     let orderbook = Arc::new(Mutex::new(raw_ob));
@@ -82,6 +65,7 @@ async fn main() -> std::io::Result<()> {
     spawn_engine_loop(rx, Arc::clone(&orderbook), broadcast_tx.clone());
     spawn_funding_task(tx.clone());
     spawn_liquidation_task(Arc::clone(&orderbook), tx.clone());
+    spawn_market_maker(Arc::clone(&orderbook), broadcast_tx.clone());
 
     let bind_addr = "0.0.0.0:8080";
     log::info!("[server] listening on http://{bind_addr}");
@@ -89,13 +73,10 @@ async fn main() -> std::io::Result<()> {
     let app_state = web::Data::new(state);
 
     HttpServer::new(move || {
-        // Allow requests from the Next.js dev server and any localhost port.
-        // In production replace the origin list with your actual domain.
         let cors = Cors::default()
             .allowed_origin("http://localhost:3000")
             .allowed_origin("http://127.0.0.1:3000")
             .allowed_origin_fn(|origin, _req| {
-                // Allow any localhost origin (handles :3001, :3002, etc.)
                 origin.as_bytes().starts_with(b"http://localhost:")
                     || origin.as_bytes().starts_with(b"http://127.0.0.1:")
             })
@@ -126,6 +107,154 @@ async fn main() -> std::io::Result<()> {
     .await
 }
 
+// ─── Market maker ─────────────────────────────────────────────────────────────
+//
+// Every 400 ms:
+//   1. Walk the current book and cancel all MM-owned resting orders.
+//   2. Read the current mark price (mid of best bid/ask).
+//   3. Place fresh bids and asks with randomised qty and slight spread jitter.
+//   4. Broadcast the updated book to all WS clients.
+//
+// This gives a constantly-moving book with realistic depth without needing
+// external price feeds.
+
+fn spawn_market_maker(
+    orderbook:    Arc<Mutex<Orderbook>>,
+    broadcast_tx: broadcast::Sender<String>,
+) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(400));
+
+        // Track the UUIDs of MM orders so we can cancel them each cycle.
+        let mut mm_bid_ids: Vec<(Uuid, u32)> = Vec::new(); // (order_id, price)
+        let mut mm_ask_ids: Vec<(Uuid, u32)> = Vec::new();
+
+        // Tiny PRNG state for fast no-dependency randomness
+        let mut rng_state: u64 = 0xdeadbeef_cafebabe;
+
+        let mut fast_rand = move || -> f64 {
+            // xorshift64
+            rng_state ^= rng_state << 13;
+            rng_state ^= rng_state >> 7;
+            rng_state ^= rng_state << 17;
+            (rng_state >> 11) as f64 / (u64::MAX >> 11) as f64
+        };
+
+        loop {
+            interval.tick().await;
+
+            // ── 1. Cancel previous MM orders ────────────────────────────────
+            {
+                let mut ob = orderbook.lock().unwrap();
+                for (oid, price) in mm_bid_ids.drain(..) {
+                    ob.cancel_order(oid, price, Side::Buy);
+                }
+                for (oid, price) in mm_ask_ids.drain(..) {
+                    ob.cancel_order(oid, price, Side::Sell);
+                }
+            }
+
+            // ── 2. Determine mid price ───────────────────────────────────────
+            let mid: u32 = {
+                let ob = orderbook.lock().unwrap();
+                match (ob.get_best_bid(), ob.get_best_ask()) {
+                    (Some(b), Some(a)) => (b + a) / 2,
+                    _ => ob.mark_price,
+                }
+            };
+
+            if mid == 0 { continue; }
+
+            // ── 3. Place fresh MM orders ─────────────────────────────────────
+            //
+            // Spread: 5–25 ticks on each side.
+            // Depth:  12 levels, qty 1–30 contracts per level.
+            // Slight random walk on mid to simulate price movement.
+            {
+                let mut ob = orderbook.lock().unwrap();
+
+                // Nudge mark price slightly each cycle (±0.05 %)
+                let drift = (fast_rand() - 0.5) * 0.001 * mid as f64;
+                let new_mark = (mid as f64 + drift).max(1.0).round() as u32;
+                ob.mark_price  = new_mark;
+                ob.index_price = new_mark.saturating_sub(50 + (fast_rand() * 100.0) as u32);
+
+                let base_spread: u32 = 5 + (fast_rand() * 20.0) as u32;
+
+                for i in 0..12u32 {
+                    let jitter   = (fast_rand() * 8.0) as u32;
+                    let bid_px   = new_mark.saturating_sub(base_spread + i * 12 + jitter);
+                    let ask_px   = new_mark + base_spread + i * 12 + jitter;
+                    let qty: u32 = 1 + (fast_rand() * 29.0) as u32;
+
+                    // Place bid
+                    let bid_oid = Uuid::new_v4();
+                    // Inject directly into book levels (bypass event log for MM orders)
+                    let bid_level = ob.bids.entry(bid_px).or_insert(orderbook::Bid {
+                        total_qty: 0,
+                        orders: Vec::new(),
+                    });
+                    bid_level.total_qty += qty;
+                    bid_level.orders.push(orderbook::OpenOrder {
+                        user_id:           bid_oid,
+                        qty,
+                        filled_qty:        0,
+                        original_order_id: bid_oid,
+                    });
+                    mm_bid_ids.push((bid_oid, bid_px));
+
+                    // Place ask
+                    let ask_oid = Uuid::new_v4();
+                    let ask_level = ob.asks.entry(ask_px).or_insert(orderbook::Ask {
+                        total_qty: 0,
+                        orders: Vec::new(),
+                    });
+                    ask_level.total_qty += qty;
+                    ask_level.orders.push(orderbook::OpenOrder {
+                        user_id:           ask_oid,
+                        qty,
+                        filled_qty:        0,
+                        original_order_id: ask_oid,
+                    });
+                    mm_ask_ids.push((ask_oid, ask_px));
+                }
+            }
+
+            // ── 4. Broadcast updated book ────────────────────────────────────
+            {
+                let ob = orderbook.lock().unwrap();
+
+                let bids: Vec<serde_json::Value> = ob.bids.iter()
+                    .rev().take(20)
+                    .map(|(p, l)| serde_json::json!({ "price": p, "qty": l.total_qty }))
+                    .collect();
+
+                let asks: Vec<serde_json::Value> = ob.asks.iter()
+                    .take(20)
+                    .map(|(p, l)| serde_json::json!({ "price": p, "qty": l.total_qty }))
+                    .collect();
+
+                let payload = serde_json::to_string(&serde_json::json!({
+                    "type":        "orderbook",
+                    "symbol":      ob.symbol,
+                    "bids":        bids,
+                    "asks":        asks,
+                    "best_bid":    ob.get_best_bid(),
+                    "best_ask":    ob.get_best_ask(),
+                    "mark_price":  ob.mark_price,
+                    "index_price": ob.index_price,
+                }))
+                .unwrap_or_default();
+
+                drop(ob);
+                let _ = broadcast_tx.send(payload);
+            }
+        }
+    });
+}
+
+// ─── Engine loop ──────────────────────────────────────────────────────────────
+
 fn spawn_engine_loop(
     mut rx:       mpsc::Receiver<OrderbookEvent>,
     orderbook:    Arc<Mutex<Orderbook>>,
@@ -150,6 +279,7 @@ fn spawn_engine_loop(
                 }
             }
 
+            // Broadcast after user-placed order
             {
                 let ob = orderbook.lock().unwrap();
 
@@ -164,12 +294,14 @@ fn spawn_engine_loop(
                     .collect();
 
                 let payload = serde_json::to_string(&serde_json::json!({
-                    "type":     "orderbook",
-                    "symbol":   ob.symbol,
-                    "bids":     bids,
-                    "asks":     asks,
-                    "best_bid": ob.get_best_bid(),
-                    "best_ask": ob.get_best_ask(),
+                    "type":        "orderbook",
+                    "symbol":      ob.symbol,
+                    "bids":        bids,
+                    "asks":        asks,
+                    "best_bid":    ob.get_best_bid(),
+                    "best_ask":    ob.get_best_ask(),
+                    "mark_price":  ob.mark_price,
+                    "index_price": ob.index_price,
                 }))
                 .unwrap_or_default();
 
@@ -183,24 +315,22 @@ fn spawn_engine_loop(
     });
 }
 
+// ─── Funding task ─────────────────────────────────────────────────────────────
+
 fn spawn_funding_task(tx: mpsc::Sender<OrderbookEvent>) {
     tokio::spawn(async move {
         let tx: mpsc::Sender<OrderbookEvent> = tx;
         let mut interval = tokio::time::interval(Duration::from_secs(8 * 3_600));
         interval.tick().await;
-
         loop {
             interval.tick().await;
-
             let mark_price:  u32 = 65_000;
             let index_price: u32 = 64_900;
-
             let event = OrderbookEvent::FundingApplied {
                 event_id: Uuid::new_v4(),
                 mark_price,
                 index_price,
             };
-
             if tx.send(event).await.is_err() {
                 log::error!("[funding] engine queue closed");
                 break;
@@ -210,6 +340,8 @@ fn spawn_funding_task(tx: mpsc::Sender<OrderbookEvent>) {
     });
 }
 
+// ─── Liquidation task ─────────────────────────────────────────────────────────
+
 fn spawn_liquidation_task(
     orderbook: Arc<Mutex<Orderbook>>,
     tx:        mpsc::Sender<OrderbookEvent>,
@@ -217,24 +349,18 @@ fn spawn_liquidation_task(
     tokio::spawn(async move {
         let tx: mpsc::Sender<OrderbookEvent> = tx;
         let mut interval = tokio::time::interval(Duration::from_secs(5));
-
         loop {
             interval.tick().await;
-
             let candidates: Vec<(Uuid, u32)> = {
                 let ob   = orderbook.lock().unwrap();
                 let mark = ob.mark_price;
                 let mm   = ob.maintenance_margin;
-
                 ob.positions
                     .iter()
-                    .filter(|(_id, pos): &(&Uuid, &Position)| {
-                        pos.margin_ratio(mark) <= mm
-                    })
+                    .filter(|(_id, pos): &(&Uuid, &Position)| pos.margin_ratio(mark) <= mm)
                     .map(|(&id, _)| (id, mark))
                     .collect()
             };
-
             for (user_id, mark_price) in candidates {
                 let event = OrderbookEvent::Liquidated {
                     event_id: Uuid::new_v4(),

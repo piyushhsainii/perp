@@ -23,12 +23,12 @@ const W = 900
 const H = 240
 const PAD = { top: 16, right: 68, bottom: 24, left: 4 }
 
-// Zoom levels: number of candles visible
 const ZOOM_LEVELS = [20, 40, 60, 80, 120, 180, 260]
-const DEFAULT_ZOOM = 3  // index into ZOOM_LEVELS → 80 candles
+const DEFAULT_ZOOM = 3  // index → 80 candles
 
 function lerp(v: number, iMin: number, iMax: number, oMin: number, oMax: number) {
-  if (iMax === iMin) return (oMin + oMax) / 2
+  // FIX: artificial padding when all prices identical — prevents flat chart
+  if (iMax <= iMin) return (oMin + oMax) / 2
   return oMin + ((v - iMin) / (iMax - iMin)) * (oMax - oMin)
 }
 
@@ -39,7 +39,6 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
   const zoomIn = useCallback(() => setZoomIdx(i => Math.max(0, i - 1)), [])
   const zoomOut = useCallback(() => setZoomIdx(i => Math.min(ZOOM_LEVELS.length - 1, i + 1)), [])
 
-  // Mouse-wheel zoom
   const onWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault()
     if (e.deltaY < 0) zoomIn()
@@ -49,23 +48,27 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
   const visibleCount = ZOOM_LEVELS[zoomIdx]
 
   const { candles, latestX, latestY, gridLines, timeLabels, priceDir } = useMemo(() => {
-    if (history.length < 2) return { candles: [], latestX: 0, latestY: H / 2, gridLines: [], timeLabels: [], priceDir: 'flat' as const }
+    if (history.length < 2) {
+      return { candles: [], latestX: 0, latestY: H / 2, gridLines: [], timeLabels: [], priceDir: 'flat' as const }
+    }
 
     const chartW = W - PAD.left - PAD.right
     const visible = history.slice(-Math.min(history.length, visibleCount))
     const n = visible.length
 
-    // Candle width scales with zoom
     const candleW = Math.max(2, Math.min(12, Math.floor(chartW / n) - 1))
     const gap = Math.max(1, Math.floor(chartW / n) - candleW)
     const totalW = n * (candleW + gap) - gap
     const startX = W - PAD.right - totalW
 
-    const allLows = visible.map(h => h.low ?? h.price ?? 0)
-    const allHighs = visible.map(h => h.high ?? h.price ?? 0)
+    const allLows = visible.map(h => h.low ?? h.price ?? markPrice)
+    const allHighs = visible.map(h => h.high ?? h.price ?? markPrice)
     const rawMin = Math.min(...allLows)
     const rawMax = Math.max(...allHighs)
-    const pad = (rawMax - rawMin) * 0.12 || 80
+
+    // FIX: if range is zero or near-zero, add artificial padding so chart isn't flat
+    const range = rawMax - rawMin
+    const pad = range > 0 ? range * 0.12 : Math.max(markPrice * 0.005, 1)
     const minP = rawMin - pad
     const maxP = rawMax + pad
 
@@ -84,7 +87,8 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
         x, cx: x + candleW / 2, candleW,
         open, close, high, low,
         wickTop: toY(high), wickBottom: toY(low),
-        bodyTop, bodyH: Math.max(1, bodyBottom - bodyTop),
+        bodyTop,
+        bodyH: Math.max(1.5, bodyBottom - bodyTop), // FIX: min 1.5px body
         isBull,
       }
     })
@@ -100,7 +104,7 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
       return { y: toY(price), price: Math.round(price) }
     })
 
-    // Time labels — show ~5 labels
+    // ~5 time labels
     const step = Math.max(1, Math.floor(n / 5))
     const timeLabels = visible
       .filter((_, i) => i % step === 0)
@@ -112,7 +116,9 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
 
     const last2 = history.slice(-2)
     const priceDir = last2.length === 2
-      ? last2[1].close > last2[0].close ? 'up' : last2[1].close < last2[0].close ? 'down' : 'flat'
+      ? last2[1].close > last2[0].close ? 'up'
+        : last2[1].close < last2[0].close ? 'down'
+          : 'flat'
       : 'flat'
 
     return { candles, latestX, latestY, gridLines, timeLabels, priceDir }
@@ -145,7 +151,6 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
 
         {/* Zoom controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
-          {/* Zoom level indicator */}
           <span style={{ fontSize: '8px', color: 'var(--text-dim)', letterSpacing: '0.06em', marginRight: '2px' }}>
             {visibleCount}C
           </span>
@@ -246,20 +251,15 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
               <feGaussianBlur stdDeviation="1.5" result="blur" />
               <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
             </filter>
-            <linearGradient id="bidGrad" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="rgba(0,255,136,0.08)" />
-              <stop offset="100%" stopColor="rgba(0,255,136,0)" />
-            </linearGradient>
           </defs>
 
           {/* Grid lines */}
           {gridLines.map(({ y, price }) => (
-            <g key={price}>
+            <g key={`grid-${price}`}>
               <line x1={PAD.left} y1={y} x2={W - PAD.right} y2={y}
                 stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
               <text x={W - PAD.right + 5} y={y + 4}
-                fill="rgba(255,255,255,0.25)" fontSize="8.5" fontFamily="var(--font-poppins)"
-              >
+                fill="rgba(255,255,255,0.25)" fontSize="8.5" fontFamily="var(--font-poppins)">
                 {price.toLocaleString()}
               </text>
             </g>
@@ -267,7 +267,7 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
 
           {/* Candlesticks */}
           {candles.map((c, i) => (
-            <g key={i}>
+            <g key={`c-${i}-${c.close}`}>
               <line
                 x1={c.cx} y1={c.wickTop}
                 x2={c.cx} y2={c.wickBottom}
@@ -306,9 +306,9 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
             />
           )}
 
-          {/* Price label on right axis */}
+          {/* Floating price label on right axis */}
           {candles.length > 0 && (
-            <motion.g animate={{ y: latestY }} transition={{ type: 'spring', stiffness: 180, damping: 22 }}>
+            <>
               <motion.rect
                 x={W - PAD.right + 1} width={PAD.right - 2} height={14}
                 animate={{ y: latestY - 7 }}
@@ -321,11 +321,10 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
                 transition={{ type: 'spring', stiffness: 180, damping: 22 }}
                 fill="#000" fontSize="8" fontWeight="700"
                 fontFamily="var(--font-poppins)"
-
               >
                 {markPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })}
               </motion.text>
-            </motion.g>
+            </>
           )}
 
           {/* Liquidation flash */}
@@ -338,9 +337,9 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
             />
           )}
 
-          {/* Time axis */}
+          {/* Time axis labels */}
           {timeLabels.map(({ x, label }) => (
-            <text key={label} x={x} y={H - 4}
+            <text key={`t-${label}`} x={x} y={H - 4}
               fill="rgba(255,255,255,0.18)" fontSize="7.5"
               textAnchor="middle" fontFamily="var(--font-poppins)">
               {label}
@@ -348,16 +347,11 @@ export default function PriceChart({ history, markPrice, liquidated, market = 'B
           ))}
         </svg>
 
-        {/* Zoom hint */}
+        {/* Scroll hint */}
         <div style={{
-          position: 'absolute',
-          bottom: '28px',
-          right: '74px',
-          fontSize: '7.5px',
-          color: 'var(--text-dim)',
-          opacity: 0.4,
-          pointerEvents: 'none',
-          letterSpacing: '0.06em',
+          position: 'absolute', bottom: '28px', right: '74px',
+          fontSize: '7.5px', color: 'var(--text-dim)',
+          opacity: 0.4, pointerEvents: 'none', letterSpacing: '0.06em',
         }}>
           scroll to zoom
         </div>

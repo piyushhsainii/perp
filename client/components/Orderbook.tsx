@@ -17,24 +17,41 @@ interface OrderbookProps {
 const ROW_COUNT = 16;
 
 export default function Orderbook({ bids, asks, bestBid, bestAsk, bidDir, askDir, market }: OrderbookProps) {
-  const topAsks = useMemo(
-    () => [...asks].sort((a, b) => a.price - b.price).slice(0, ROW_COUNT).reverse(),
-    [asks]
-  );
-  const topBids = useMemo(
-    () => [...bids].sort((a, b) => b.price - a.price).slice(0, ROW_COUNT),
-    [bids]
-  );
+  // FIX: create new sorted arrays every render so useMemo actually recomputes
+  // when prices/qtys change (deep comparison, not reference equality)
+  const topAsks = useMemo(() => {
+    return [...asks]
+      .sort((a, b) => a.price - b.price)
+      .slice(0, ROW_COUNT)
+      .reverse();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(asks)]);
 
-  const maxAskQty = useMemo(() => Math.max(...topAsks.map((a) => a.qty), 1), [topAsks]);
-  const maxBidQty = useMemo(() => Math.max(...topBids.map((b) => b.qty), 1), [topBids]);
+  const topBids = useMemo(() => {
+    return [...bids]
+      .sort((a, b) => b.price - a.price)
+      .slice(0, ROW_COUNT);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(bids)]);
+
+  // FIX: maxQty recalculates whenever topAsks/topBids change
+  const maxAskQty = useMemo(
+    () => Math.max(...topAsks.map((a) => a.qty), 1),
+    [topAsks]
+  );
+  const maxBidQty = useMemo(
+    () => Math.max(...topBids.map((b) => b.qty), 1),
+    [topBids]
+  );
 
   const spread = bestBid && bestAsk ? bestAsk - bestBid : null;
-  const spreadPct =
-    bestAsk && bestBid ? (((bestAsk - bestBid) / bestAsk) * 100).toFixed(3) : null;
+  const spreadPct = bestAsk && bestBid
+    ? (((bestAsk - bestBid) / bestAsk) * 100).toFixed(3)
+    : null;
 
   return (
     <div style={{ background: "var(--panel)", border: "1px solid var(--border)", display: "flex", flexDirection: "column", height: "100%", minHeight: 0, overflow: "hidden" }}>
+
       {/* Header */}
       <div style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
         <span style={{ fontSize: "9px", fontWeight: 600, letterSpacing: "0.1em", color: "var(--text-dim)", textTransform: "uppercase" }}>
@@ -54,12 +71,11 @@ export default function Orderbook({ bids, asks, bestBid, bestAsk, bidDir, askDir
         <span style={{ textAlign: "right" }}>Total</span>
       </div>
 
-      {/* ASKS — scroll independently */}
+      {/* ASKS — scroll independently, justify bottom so best ask is nearest spread */}
       <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column", justifyContent: "flex-end", minHeight: 0 }}>
         <AnimatePresence initial={false}>
           {topAsks.map((level) => (
             <BookRow
-              // FIX: prefix with side to guarantee uniqueness across bid/ask keys
               key={`ask-${level.price}`}
               level={level}
               maxQty={maxAskQty}
@@ -69,10 +85,10 @@ export default function Orderbook({ bids, asks, bestBid, bestAsk, bidDir, askDir
         </AnimatePresence>
       </div>
 
-      {/* Spread divider */}
+      {/* Spread / mid divider */}
       <div style={{ padding: "5px 10px", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0, background: "rgba(0,0,0,0.2)" }}>
         <motion.span
-          key={`ask-best-${bestAsk ?? 0}`}
+          key={`bestask-${bestAsk ?? 0}`}
           animate={{ opacity: [0.5, 1] }}
           transition={{ duration: 0.15 }}
           style={{ fontSize: "13px", fontWeight: 600, color: "var(--plasma)", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}
@@ -83,7 +99,7 @@ export default function Orderbook({ bids, asks, bestBid, bestAsk, bidDir, askDir
           mid {bestBid && bestAsk ? Math.round((bestBid + bestAsk) / 2).toLocaleString() : "—"}
         </span>
         <motion.span
-          key={`bid-best-${bestBid ?? 0}`}
+          key={`bestbid-${bestBid ?? 0}`}
           animate={{ opacity: [0.5, 1] }}
           transition={{ duration: 0.15 }}
           style={{ fontSize: "13px", fontWeight: 600, color: "var(--acid)", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}
@@ -120,13 +136,13 @@ function BookRow({ level, maxQty, side }: { level: OrderLevel; maxQty: number; s
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: isBid ? -8 : 8 }}
       transition={{ duration: 0.15, ease: "easeOut" }}
-      style={{ position: "relative", display: "grid", gridTemplateColumns: "40% 28% 32%", padding: "0 10px", height: "20px", alignItems: "center", cursor: "default", userSelect: "none" }}
+      style={{ position: "relative", display: "grid", gridTemplateColumns: "40% 28% 32%", padding: "0 10px", height: "20px", alignItems: "center", userSelect: "none" }}
     >
-      {/* Depth bar — use opacity animation NOT backgroundColor to avoid Framer Motion warning */}
+      {/* Depth bar — width animates, NO backgroundColor animation (avoids Framer warning) */}
       <motion.div
         animate={{ width: `${pct}%` }}
         transition={{ duration: 0.25, ease: "easeOut" }}
-        style={{ position: "absolute", insetBlock: "1px", right: 0, opacity: 0.7, background: isBid ? "rgba(0,255,136,0.1)" : "rgba(255,59,107,0.12)", pointerEvents: "none" }}
+        style={{ position: "absolute", insetBlock: "1px", right: 0, background: isBid ? "rgba(0,255,136,0.1)" : "rgba(255,59,107,0.12)", pointerEvents: "none" }}
       />
       <span style={{ color: isBid ? "var(--acid)" : "var(--plasma)", fontSize: "11px", fontWeight: 300, letterSpacing: "-0.02em", position: "relative", zIndex: 1, fontVariantNumeric: "tabular-nums" }}>
         {level.price.toLocaleString()}

@@ -49,13 +49,25 @@ function useSpotTicker(): MarketTick[] {
     Object.fromEntries(TICKER_MARKETS.map(m => [m.id, m.base]))
   )
   const change24Ref = useRef<Record<string, number>>(
-    Object.fromEntries(TICKER_MARKETS.map(m => [m.id, (Math.random() - 0.48) * 8]))
+    Object.fromEntries(TICKER_MARKETS.map(m => [m.id, 0]))
   )
+  const [mounted, setMounted] = useState(false)
+
+  // Deterministic initial ticks — same on server and client
   const [ticks, setTicks] = useState<MarketTick[]>(
-    TICKER_MARKETS.map(m => ({ id: m.id, price: m.base, change24: change24Ref.current[m.id] }))
+    TICKER_MARKETS.map(m => ({ id: m.id, price: m.base, change24: 0 }))
   )
 
+  // Seed random values only after hydration completes
   useEffect(() => {
+    change24Ref.current = Object.fromEntries(
+      TICKER_MARKETS.map(m => [m.id, (Math.random() - 0.48) * 8])
+    )
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!mounted) return
     const id = setInterval(() => {
       const next: MarketTick[] = TICKER_MARKETS.map(m => {
         const prev = pricesRef.current[m.id]
@@ -70,7 +82,7 @@ function useSpotTicker(): MarketTick[] {
       setTicks(next)
     }, TICK_MS)
     return () => clearInterval(id)
-  }, [])
+  }, [mounted])
 
   return ticks
 }

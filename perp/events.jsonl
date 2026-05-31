@@ -1,0 +1,11 @@
+{"type":"OrderPlaced","event_id":"084f58d4-3264-44a7-8d59-16ee99df80dc","user_id":"72758ce5-3515-478d-836d-60f2c08aa27d","original_order_id":"fd780960-df4b-48bf-a61d-61ff740cfeb5","side":"Buy","qty":1,"price":null,"margin":65.0}
+{"type":"Liquidated","event_id":"0df260a7-d7d1-4d49-8b64-a14da87cc898","user_id":"72758ce5-3515-478d-836d-60f2c08aa27d","mark_price":65000}
+{"type":"Liquidated","event_id":"fdf7dcef-b1f9-4713-a9bf-dcf9713ca34c","user_id":"1d9d46dc-0614-4e56-98a4-960a9ccab687","mark_price":65000}
+{"type":"OrderPlaced","event_id":"2cb32b68-b651-4b9a-ad33-9ab17d39fc6e","user_id":"72758ce5-3515-478d-836d-60f2c08aa27d","original_order_id":"86916f96-c32d-4e5c-8720-607a3df62e32","side":"Buy","qty":1,"price":null,"margin":65.0}
+{"type":"OrderPlaced","event_id":"d00b04fd-7d37-4de6-a141-c8b8edfe25b2","user_id":"72758ce5-3515-478d-836d-60f2c08aa27d","original_order_id":"e386cb12-72f2-47b9-ab6f-7d7a22bc94cc","side":"Buy","qty":1,"price":null,"margin":65.0}
+{"type":"Liquidated","event_id":"28c884f1-88c4-495e-b34b-70216e5c4c93","user_id":"72758ce5-3515-478d-836d-60f2c08aa27d","mark_price":65000}
+{"type":"Liquidated","event_id":"0b6e093d-cc70-4a95-bbe0-52647804dded","user_id":"1d9d46dc-0614-4e56-98a4-960a9ccab687","mark_price":65000}
+{"type":"OrderPlaced","event_id":"e7eb3ef1-ab17-44e7-a026-16c59d6fa358","user_id":"72758ce5-3515-478d-836d-60f2c08aa27d","original_order_id":"075388a3-5f02-4147-8e1f-d30ca16f6c0a","side":"Sell","qty":1,"price":null,"margin":65.0}
+{"type":"Liquidated","event_id":"7329f3fc-03a6-426f-8741-2ce382335e4c","user_id":"72758ce5-3515-478d-836d-60f2c08aa27d","mark_price":65000}
+{"type":"Liquidated","event_id":"52d39811-b788-418f-a9f8-30a43f58fb0e","user_id":"1411a67a-fb6e-455e-bd9e-11759072695c","mark_price":65000}
+{"type":"OrderPlaced","event_id":"644242e7-369b-4be0-8bd5-de163be4fbc7","user_id":"72758ce5-3515-478d-836d-60f2c08aa27d","original_order_id":"77203a27-3d01-4ade-bc2f-e5dda9281b34","side":"Sell","qty":1,"price":65000,"margin":65.0}
