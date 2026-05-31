@@ -1,7 +1,5 @@
-// next.config.mjs
-/** @type {import('next').NextConfig} */
 const nextConfig = {
-  // your existing options
+  // options
 };
 
-export default nextConfig;
+module.exports = nextConfig;
