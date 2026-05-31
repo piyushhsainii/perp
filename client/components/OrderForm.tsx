@@ -18,15 +18,14 @@ interface OrderFormProps {
 // ─── Predefined contract sizes per market base ────────────────────────────────
 
 const PRESET_SIZES: Record<string, number[]> = {
-  'BTC-PERP': [0.1, 0.5, 1, 5, 10],
-  'ETH-PERP': [1, 5, 10, 50, 100],
-  'SOL-PERP': [10, 50, 100, 500, 1000],
-  'BNB-PERP': [1, 5, 10, 50, 100],
-  'ARB-PERP': [100, 500, 1000, 5000, 10000],
+  'BTC-PERP':  [0.1, 0.5, 1, 5, 10],
+  'ETH-PERP':  [1, 5, 10, 50, 100],
+  'SOL-PERP':  [10, 50, 100, 500, 1000],
+  'BNB-PERP':  [1, 5, 10, 50, 100],
+  'ARB-PERP':  [100, 500, 1000, 5000, 10000],
   'DOGE-PERP': [100, 500, 1000, 5000, 10000],
 }
 const DEFAULT_PRESETS = [1, 5, 10, 25, 50]
-
 const LEVERAGE_PRESETS = [2, 5, 10, 20, 50]
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
@@ -52,9 +51,7 @@ function Label({ children, hint }: { children: React.ReactNode; hint?: string })
   )
 }
 
-function SummaryRow({
-  label, hint, value, color,
-}: {
+function SummaryRow({ label, hint, value, color }: {
   label: string; hint?: string; value: string; color?: string
 }) {
   return (
@@ -80,7 +77,7 @@ function SummaryRow({
   )
 }
 
-// ─── Main component ────────────────────────────────────────────────────────────
+// ─── Main component ───────────────────────────────────────────────────────────
 
 export default function OrderForm({
   markPrice, balance, onOrder, orderError, lastFlash,
@@ -143,7 +140,6 @@ export default function OrderForm({
       ? 'var(--gold)'
       : 'var(--text)'
 
-  // ── Input style ──────────────────────────────────────────────────────────────
   const inputStyle: React.CSSProperties = {
     width: '100%', boxSizing: 'border-box',
     background: 'var(--surface)',
@@ -259,7 +255,6 @@ export default function OrderForm({
               </span>
             )}
           </div>
-
           <div style={{ position: 'relative' }}>
             <input
               type="number" min="0.001" step="1"
@@ -271,46 +266,33 @@ export default function OrderForm({
             />
             <span style={{ position: 'absolute', right: '9px', top: '50%', transform: 'translateY(-50%)', fontSize: '9px', color: 'var(--text-dim)', pointerEvents: 'none' }}>CONT</span>
           </div>
-
-          {/* Predefined contract sizes */}
           <div style={{ display: 'flex', gap: '3px', marginTop: '5px' }}>
             {presets.map(p => (
-              <button
-                key={p}
-                onClick={() => setQty(String(p))}
-                style={{
-                  flex: 1, padding: '3px 0',
-                  fontSize: '8px', fontWeight: parseFloat(qty) === p ? 600 : 300,
-                  background: parseFloat(qty) === p ? 'var(--muted)' : 'transparent',
-                  border: `1px solid ${parseFloat(qty) === p ? 'var(--text-dim)' : 'var(--border)'}`,
-                  color: parseFloat(qty) === p ? 'var(--text)' : 'var(--text-dim)',
-                  borderRadius: '3px', cursor: 'pointer',
-                  fontFamily: 'var(--font-poppins)', letterSpacing: '0.04em',
-                  transition: 'all 0.1s',
-                }}
-              >
+              <button key={p} onClick={() => setQty(String(p))} style={{
+                flex: 1, padding: '3px 0',
+                fontSize: '8px', fontWeight: parseFloat(qty) === p ? 600 : 300,
+                background: parseFloat(qty) === p ? 'var(--muted)' : 'transparent',
+                border: `1px solid ${parseFloat(qty) === p ? 'var(--text-dim)' : 'var(--border)'}`,
+                color: parseFloat(qty) === p ? 'var(--text)' : 'var(--text-dim)',
+                borderRadius: '3px', cursor: 'pointer',
+                fontFamily: 'var(--font-poppins)', letterSpacing: '0.04em', transition: 'all 0.1s',
+              }}>
                 {p}
               </button>
             ))}
           </div>
-
-          {/* % of max size */}
           <div style={{ display: 'flex', gap: '3px', marginTop: '4px' }}>
             {[25, 50, 75, 100].map(pct => {
               const maxQty = balance * leverage / fillPrice
               const pctQty = (maxQty * pct / 100).toFixed(3)
               return (
-                <button
-                  key={pct}
-                  onClick={() => setQty(pctQty)}
-                  style={{
-                    flex: 1, padding: '3px 0', fontSize: '8px', fontWeight: 300,
-                    background: 'transparent',
-                    border: '1px solid var(--border)',
-                    color: 'var(--text-dim)', borderRadius: '3px',
-                    cursor: 'pointer', fontFamily: 'var(--font-poppins)',
-                    letterSpacing: '0.04em', transition: 'all 0.1s',
-                  }}
+                <button key={pct} onClick={() => setQty(pctQty)} style={{
+                  flex: 1, padding: '3px 0', fontSize: '8px', fontWeight: 300,
+                  background: 'transparent', border: '1px solid var(--border)',
+                  color: 'var(--text-dim)', borderRadius: '3px',
+                  cursor: 'pointer', fontFamily: 'var(--font-poppins)',
+                  letterSpacing: '0.04em', transition: 'all 0.1s',
+                }}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--text-dim)'; e.currentTarget.style.color = 'var(--text)' }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = 'var(--text-dim)' }}
                 >
@@ -363,7 +345,6 @@ export default function OrderForm({
             </span>
             <span style={{ fontSize: '7.5px', fontWeight: 300, color: 'rgba(107,114,128,0.5)' }}>take profit &amp; stop loss — optional</span>
           </div>
-
           {/* Take Profit */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', alignItems: 'center' }}>
             <div>
@@ -391,7 +372,6 @@ export default function OrderForm({
             </div>
             <Toggle active={tpEnabled} color="var(--acid)" onChange={setTpEnabled} topOffset="16px" />
           </div>
-
           {/* Stop Loss */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '8px', alignItems: 'center' }}>
             <div>
@@ -486,86 +466,54 @@ export default function OrderForm({
           )}
         </AnimatePresence>
 
-        {/* ── Submit ── */}
-        <motion.button
-          onClick={handleSubmit}
-          whileTap={{ scale: 0.97 }}
-          style={{
-            padding: '10px', borderRadius: '4px', border: 'none',
-            cursor: 'pointer',
-            fontSize: '11px', fontWeight: 600,
-            fontFamily: 'var(--font-poppins)', letterSpacing: '0.06em',
-            background: isBuy ? 'var(--acid)' : 'var(--plasma)',
-            color: isBuy ? '#000' : '#fff',
-            boxShadow: isBuy ? '0 0 18px rgba(0,255,136,0.12)' : '0 0 18px rgba(255,59,107,0.12)',
-            transition: 'opacity 0.15s',
-          }}
-        >
-          {isBuy ? '▲ LONG' : '▼ SHORT'} {qty || '0'} @ {leverage}×
-        </motion.button>
-      </div>
-
-      {/* ── Wallet gate overlay ── */}
-      <AnimatePresence>
-        {!walletConnected && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        {/* ── Submit / Connect ── */}
+        {walletConnected ? (
+          <motion.button
+            onClick={handleSubmit}
+            whileTap={{ scale: 0.97 }}
             style={{
-              position: 'absolute', inset: 0,
-              background: 'rgba(8,10,15,0.82)',
-              backdropFilter: 'blur(3px)',
-              display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'center',
-              gap: '12px', zIndex: 10,
-              borderRadius: '2px',
+              padding: '10px', borderRadius: '4px', border: 'none',
+              cursor: 'pointer',
+              fontSize: '11px', fontWeight: 600,
+              fontFamily: 'var(--font-poppins)', letterSpacing: '0.06em',
+              background: isBuy ? 'var(--acid)' : 'var(--plasma)',
+              color: isBuy ? '#000' : '#fff',
+              boxShadow: isBuy ? '0 0 18px rgba(0,255,136,0.12)' : '0 0 18px rgba(255,59,107,0.12)',
+              transition: 'opacity 0.15s',
             }}
           >
-            {/* Phantom logo-ish icon */}
-            <div style={{
-              width: '44px', height: '44px', borderRadius: '50%',
+            {isBuy ? '▲ LONG' : '▼ SHORT'} {qty || '0'} @ {leverage}×
+          </motion.button>
+        ) : (
+          // ── Wallet not connected: replace submit with connect button ──
+          // Direct onClick → no overlay, no indirection, Phantom popup fires immediately
+          <button
+            onClick={onConnectWallet}
+            style={{
+              padding: '10px', borderRadius: '4px', border: 'none',
+              cursor: 'pointer',
+              fontSize: '11px', fontWeight: 600,
+              fontFamily: 'var(--font-poppins)', letterSpacing: '0.06em',
               background: 'linear-gradient(135deg, #9945FF, #6C3EC2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '22px', boxShadow: '0 0 24px rgba(153,69,255,0.35)',
-            }}>
-              👻
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text)', letterSpacing: '0.04em', marginBottom: '4px' }}>
-                Connect Wallet to Trade
-              </div>
-              <div style={{ fontSize: '9px', fontWeight: 300, color: 'var(--text-dim)', lineHeight: 1.5 }}>
-                You're in view-only mode.<br />Connect Phantom to place orders.
-              </div>
-            </div>
-            <button
-              onClick={onConnectWallet}
-              style={{
-                padding: '9px 24px',
-                background: 'linear-gradient(135deg, #9945FF, #6C3EC2)',
-                border: 'none', borderRadius: '6px',
-                color: '#fff', fontSize: '11px', fontWeight: 600,
-                fontFamily: 'var(--font-poppins)', letterSpacing: '0.06em',
-                cursor: 'pointer',
-                boxShadow: '0 0 20px rgba(153,69,255,0.3)',
-                transition: 'opacity 0.15s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.opacity = '0.85' }}
-              onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
-            >
-              Connect Phantom
-            </button>
-          </motion.div>
+              color: '#fff',
+              boxShadow: '0 0 18px rgba(153,69,255,0.25)',
+              transition: 'opacity 0.15s',
+              width: '100%',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.opacity = '0.85' }}
+            onMouseLeave={e => { e.currentTarget.style.opacity = '1' }}
+          >
+            👻 Connect Phantom to Trade
+          </button>
         )}
-      </AnimatePresence>
+      </div>
     </div>
   )
 }
 
 // ─── Toggle switch ────────────────────────────────────────────────────────────
 
-function Toggle({
-  active, color, onChange, topOffset = '0px',
-}: {
+function Toggle({ active, color, onChange, topOffset = '0px' }: {
   active: boolean; color: string; onChange: (v: boolean) => void; topOffset?: string
 }) {
   return (
