@@ -75,6 +75,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         let cors = Cors::default()
             .allowed_origin("http://localhost:3000")
+            .allowed_origin("https://perp.vercel.app")
             .allowed_origin("http://127.0.0.1:3000")
             .allowed_origin_fn(|origin, _req| {
                 origin.as_bytes().starts_with(b"http://localhost:")
