@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 
 import { useSimulation } from "../hooks/useSimulation";
 import { useOrderbook } from "../hooks/useOrderbook";
+import { usePhantom } from "../hooks/usePhantom";
 
 import TopBar from "../components/TopBar";
 import PriceChart from "../components/PriceChart";
@@ -14,8 +15,6 @@ import PositionPanel from "../components/PositionPanel";
 import RecentTrades from "../components/RecentTrades";
 import TradeHistory from "../components/TradeHistory";
 import FundingRate from "../components/FundingRate";
-
-// ─── Markets ──────────────────────────────────────────────────────────────────
 
 export interface Market {
   id: string;
@@ -33,10 +32,6 @@ const MARKETS: Market[] = [
 ];
 
 type Tab = "position" | "history";
-
-// ─── Engine down overlay ──────────────────────────────────────────────────────
-// Shown when the WS backend has never connected and all retries are exhausted.
-// Blocks all trading — there is no sim fallback.
 
 function EngineDownOverlay({ retrying, onRetry }: { retrying: boolean; onRetry: () => void }) {
   const [elapsed, setElapsed] = useState(0);
@@ -63,7 +58,6 @@ function EngineDownOverlay({ retrying, onRetry }: { retrying: boolean; onRetry: 
       <div className="grid-bg" style={{ position: "absolute", inset: 0, opacity: 0.15, pointerEvents: "none" }} />
 
       <div style={{ position: "relative", textAlign: "center", maxWidth: 420, padding: "0 24px" }}>
-        {/* Icon */}
         <motion.div
           animate={{ scale: [1, 1.08, 1], opacity: [0.7, 1, 0.7] }}
           transition={{ repeat: Infinity, duration: 2.4 }}
@@ -72,26 +66,22 @@ function EngineDownOverlay({ retrying, onRetry }: { retrying: boolean; onRetry: 
           ⚙️
         </motion.div>
 
-        {/* Title */}
         <div style={{
           fontSize: 18, fontWeight: 700, letterSpacing: "0.12em",
-          color: "var(--plasma)", marginBottom: 10,
-          textTransform: "uppercase",
+          color: "var(--plasma)", marginBottom: 10, textTransform: "uppercase",
         }}>
           DEX Engine Offline
         </div>
 
-        {/* Description */}
         <div style={{
           fontSize: 12, fontWeight: 300, color: "var(--text-dim)",
           lineHeight: 1.7, marginBottom: 28, letterSpacing: "0.02em",
         }}>
           The trading engine is temporarily unavailable.<br />
-          We're working to restore service as soon as possible.<br />
+          We&apos;re working to restore service as soon as possible.<br />
           No orders can be placed while the engine is offline.
         </div>
 
-        {/* Status row */}
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "center",
           gap: 8, marginBottom: 24,
@@ -100,16 +90,12 @@ function EngineDownOverlay({ retrying, onRetry }: { retrying: boolean; onRetry: 
           <motion.span
             animate={{ opacity: [1, 0.2, 1] }}
             transition={{ repeat: Infinity, duration: 1.2 }}
-            style={{
-              width: 6, height: 6, borderRadius: "50%",
-              background: "var(--plasma)", display: "inline-block",
-            }}
+            style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--plasma)", display: "inline-block" }}
           />
           {retrying ? "RECONNECTING…" : "CONNECTION FAILED"}
           <span style={{ opacity: 0.4 }}>· {elapsed}s</span>
         </div>
 
-        {/* Retry button */}
         <motion.button
           whileTap={{ scale: 0.96 }}
           onClick={onRetry}
@@ -121,8 +107,7 @@ function EngineDownOverlay({ retrying, onRetry }: { retrying: boolean; onRetry: 
             fontSize: 10, fontWeight: 600, letterSpacing: "0.1em",
             padding: "9px 28px", borderRadius: 4,
             cursor: retrying ? "not-allowed" : "pointer",
-            fontFamily: "var(--font-poppins)",
-            transition: "all 0.15s",
+            fontFamily: "var(--font-poppins)", transition: "all 0.15s",
           }}
         >
           {retrying ? "RETRYING…" : "RETRY NOW"}
@@ -136,16 +121,9 @@ function EngineDownOverlay({ retrying, onRetry }: { retrying: boolean; onRetry: 
   );
 }
 
-// ─── Loading screen ───────────────────────────────────────────────────────────
-// Shown for the first ~1.5s while we wait to see if the WS connects.
-
 function LoadingScreen({ market }: { market: string }) {
   const [phase, setPhase] = useState(0);
-  const phases = [
-    "Connecting to engine…",
-    `Subscribing to ${market}…`,
-    "Streaming orderbook…",
-  ];
+  const phases = ["Connecting to engine…", `Subscribing to ${market}…`, "Streaming orderbook…"];
 
   useEffect(() => {
     const id = setInterval(() => setPhase(p => Math.min(p + 1, phases.length - 1)), 600);
@@ -211,8 +189,6 @@ function LoadingScreen({ market }: { market: string }) {
   );
 }
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-
 function Toast({ toast }: { toast: { msg: string; type: "success" | "error" | "pending" } | null }) {
   const colors = { success: "var(--acid)", error: "var(--plasma)", pending: "var(--gold)" };
   const bgs = { success: "rgba(0,255,136,0.08)", error: "rgba(255,59,107,0.08)", pending: "rgba(240,165,0,0.08)" };
@@ -246,8 +222,6 @@ function Toast({ toast }: { toast: { msg: string; type: "success" | "error" | "p
   );
 }
 
-// ─── Market selector ──────────────────────────────────────────────────────────
-
 function MarketSelector({ markets, selected, onSelect }: {
   markets: Market[]; selected: string; onSelect: (id: string) => void;
 }) {
@@ -274,24 +248,19 @@ function MarketSelector({ markets, selected, onSelect }: {
   );
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
-
-const WS_CONNECT_TIMEOUT_MS = 5_000; // how long to wait before declaring engine down
+const WS_CONNECT_TIMEOUT_MS = 5_000;
 
 export default function TradingView() {
   const [selectedMarketId, setSelectedMarketId] = useState("BTC-PERP");
 
-  // Three UI states:
-  //   "loading"  — waiting to see if WS connects (first 5 s)
-  //   "live"     — WS connected, backend running
-  //   "down"     — WS failed, engine offline
   const [appState, setAppState] = useState<"loading" | "live" | "down">("loading");
   const [retrying, setRetrying] = useState(false);
   const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const wallet = usePhantom();
+
   const { data: liveOb, connected, bidDir, askDir } = useOrderbook();
 
-  // Transition: loading → live when WS connects
   useEffect(() => {
     if (connected) {
       if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
@@ -300,19 +269,16 @@ export default function TradingView() {
     }
   }, [connected]);
 
-  // Transition: loading → down if WS never connects within timeout
   useEffect(() => {
     if (appState !== "loading") return;
     connectTimeoutRef.current = setTimeout(() => {
       if (!connected) setAppState("down");
     }, WS_CONNECT_TIMEOUT_MS);
     return () => { if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current); };
-  }, [appState]); // re-arm on every retry
+  }, [appState]);
 
-  // Transition: live → down if WS drops after connecting
   useEffect(() => {
     if (appState === "live" && !connected) {
-      // Give it 8 s to reconnect before showing the overlay
       connectTimeoutRef.current = setTimeout(() => {
         if (!connected) setAppState("down");
       }, 8_000);
@@ -322,7 +288,7 @@ export default function TradingView() {
 
   const handleRetry = () => {
     setRetrying(true);
-    setAppState("loading"); // re-arm timeout, re-show loading screen briefly
+    setAppState("loading");
   };
 
   const {
@@ -336,7 +302,6 @@ export default function TradingView() {
     liveOb.indexPrice,
   );
 
-  // Only use live orderbook data — no sim fallback for the book
   const displayOb = connected && liveOb.bids.length > 0
     ? { bids: liveOb.bids, asks: liveOb.asks, best_bid: liveOb.best_bid, best_ask: liveOb.best_ask }
     : { bids: orderbook.bids, asks: orderbook.asks, best_bid: orderbook.bids[0]?.price ?? null, best_ask: orderbook.asks[0]?.price ?? null };
@@ -345,19 +310,14 @@ export default function TradingView() {
 
   return (
     <>
-      {/* Loading screen */}
       <AnimatePresence>
         {appState === "loading" && <LoadingScreen market={selectedMarketId} />}
       </AnimatePresence>
 
-      {/* Engine down overlay — blocks all interaction */}
       <AnimatePresence>
-        {appState === "down" && (
-          <EngineDownOverlay retrying={retrying} onRetry={handleRetry} />
-        )}
+        {appState === "down" && <EngineDownOverlay retrying={retrying} onRetry={handleRetry} />}
       </AnimatePresence>
 
-      {/* Toast */}
       <Toast toast={orderToast ?? null} />
 
       <div style={{ width: "100%", minWidth: "1100px", height: "100dvh", overflow: "auto", background: "var(--void)" }}>
@@ -366,7 +326,6 @@ export default function TradingView() {
           margin: "0 auto", height: "100dvh",
           display: "flex", flexDirection: "column",
           position: "relative", overflow: "hidden",
-          // Dim the UI when engine is down but don't unmount (keeps layout stable)
           filter: appState === "down" ? "brightness(0.3)" : "none",
           pointerEvents: appState === "down" ? "none" : "auto",
           transition: "filter 0.4s",
@@ -380,6 +339,7 @@ export default function TradingView() {
             balance={demo.balance}
             connected={connected}
             onReset={resetDemo}
+            wallet={wallet}
           />
 
           <FundingRate rate={fundingRate} markPrice={demo.markPrice} indexPrice={demo.indexPrice} />
@@ -390,10 +350,8 @@ export default function TradingView() {
             onSelect={id => { setSelectedMarketId(id); resetDemo(); }}
           />
 
-          {/* 3-col grid */}
           <div style={{ flex: 1, display: "grid", gridTemplateColumns: "220px 1fr 290px", gap: "1px", background: "var(--border)", minHeight: 0, position: "relative", zIndex: 1 }}>
 
-            {/* LEFT */}
             <div style={{ display: "grid", gridTemplateRows: "1fr 190px", gap: "1px", background: "var(--border)", minHeight: 0 }}>
               <Orderbook
                 bids={displayOb.bids} asks={displayOb.asks}
@@ -403,19 +361,22 @@ export default function TradingView() {
               <RecentTrades markPrice={demo.markPrice} />
             </div>
 
-            {/* CENTER */}
             <div style={{ display: "grid", gridTemplateRows: "1fr 190px", gap: "1px", background: "var(--border)", minHeight: 0 }}>
               <PriceChart history={priceHistory} markPrice={demo.markPrice} liquidated={liquidated} market={selectedMarketId} />
               <TradeHistory trades={demo.trades} />
             </div>
 
-            {/* RIGHT */}
             <div style={{ display: "grid", gridTemplateRows: "auto 1fr", gap: "1px", background: "var(--border)", minHeight: 0 }}>
               <div style={{ overflowY: "auto", minHeight: 0 }}>
                 <OrderForm
-                  markPrice={demo.markPrice} balance={demo.balance}
-                  onOrder={placeOrder} orderError={orderError}
-                  lastFlash={lastOrderFlash} market={selectedMarketId}
+                  markPrice={demo.markPrice}
+                  balance={demo.balance}
+                  onOrder={placeOrder}
+                  orderError={orderError}
+                  lastFlash={lastOrderFlash}
+                  market={selectedMarketId}
+                  walletConnected={wallet.connected}
+                  onConnectWallet={wallet.connect}
                 />
               </div>
 
@@ -456,7 +417,6 @@ export default function TradingView() {
             </div>
           </div>
 
-          {/* Liquidation overlay */}
           <AnimatePresence>
             {liquidated && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -476,7 +436,6 @@ export default function TradingView() {
             )}
           </AnimatePresence>
 
-          {/* Order flash */}
           <AnimatePresence>
             {lastOrderFlash && (
               <motion.div

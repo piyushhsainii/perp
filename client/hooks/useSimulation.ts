@@ -1,5 +1,22 @@
 "use client";
 
+/**
+ * useSimulation.ts
+ *
+ * When backend is CONNECTED:
+ *   - Orders   → POST /order  (Rust engine)
+ *   - Position → GET  /position/:userId  (polled every 2 s)
+ *   - Funding  → GET  /funding-rate      (polled every 30 s)
+ *   - Mark price → WS midpoint (passed in via liveMarkPrice)
+ *   - Price history → ticks from real WS price
+ *
+ * When DISCONNECTED:
+ *   - Everything runs from the existing random-walk simulation.
+ *
+ * The hook's return shape is identical in both modes so TradingView
+ * doesn't need to branch.
+ */
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   nextMarkPrice,
@@ -11,162 +28,152 @@ import {
   liquidationPrice,
   type DemoState,
   type OrderParams,
-  type SimTrade,
 } from "../lib/simulation";
 import * as api from "../lib/api";
+import type { Position as BackendPosition } from "../lib/types";
+
+// ─── Config ───────────────────────────────────────────────────────────────────
 
 const TICK_MS = 900;
 const VOLATILITY = 0.0009;
-const STARTING_BALANCE = 500;
+const STARTING_BALANCE = 10_000;
+const POSITION_POLL_MS = 2_000;
+const FUNDING_POLL_MS = 30_000;
 
-// Per-market base prices for seeding sim when backend not connected
-const MARKET_BASE_PRICES: Record<string, number> = {
-  "BTC-PERP": 65_000,
-  "ETH-PERP": 3_200,
-  "SOL-PERP": 180,
-  "BNB-PERP": 580,
-  "ARB-PERP": 1,
-  "DOGE-PERP": 0,
-};
+// ─── User identity ────────────────────────────────────────────────────────────
 
-function getBasePrice(marketId: string): number {
-  return MARKET_BASE_PRICES[marketId] ?? 100;
+function getUserId(): string {
+  if (typeof window === "undefined") return crypto.randomUUID();
+  const stored = localStorage.getItem("perp_user_id");
+  if (stored) return stored;
+  const id = crypto.randomUUID();
+  localStorage.setItem("perp_user_id", id);
+  return id;
 }
 
-function seedHistory(basePrice: number): {
-  price: number;
-  time: number;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-}[] {
-  const now = Date.now();
-  let p = Math.max(1, basePrice);
-  return Array.from({ length: 80 }, (_, i) => {
-    const open = Math.round(p);
-    p = Math.max(1, p + (Math.random() - 0.498) * p * VOLATILITY * 5);
-    const close = Math.round(p);
-    return {
-      price: close,
-      time: now - (80 - i) * TICK_MS,
-      open,
-      close,
-      high: Math.round(Math.max(open, close) + Math.random() * p * 0.0004),
-      low: Math.round(Math.min(open, close) - Math.random() * p * 0.0004),
-    };
-  });
+// ─── Map backend position → sim position ─────────────────────────────────────
+
+function backendToSimPosition(p: BackendPosition) {
+  return {
+    side: p.side,
+    size: p.size,
+    entryPrice: p.entry_price,
+    margin: p.margin,
+    leverage: p.leverage,
+  };
 }
 
-function initialState(basePrice = 65_000): DemoState {
+// ─── Initial state ────────────────────────────────────────────────────────────
+
+const INITIAL_PRICE = 65_000;
+
+function initialState(): DemoState {
   return {
     balance: STARTING_BALANCE,
     position: null,
     trades: [],
-    markPrice: basePrice,
-    indexPrice: Math.max(1, basePrice - Math.round(basePrice * 0.001)),
+    markPrice: INITIAL_PRICE,
+    indexPrice: INITIAL_PRICE - 50,
   };
 }
 
-function getOrCreateUserId(): string {
-  if (typeof window === "undefined") return crypto.randomUUID();
-  let id = sessionStorage.getItem("perp_user_id");
-  if (!id) {
-    id = crypto.randomUUID();
-    sessionStorage.setItem("perp_user_id", id);
-  }
-  return id;
+function initialHistory(now: number) {
+  let p = INITIAL_PRICE;
+  return Array.from({ length: 80 }, (_, i) => {
+    const open = Math.round(p);
+    p = Math.max(100, p + (Math.random() - 0.498) * p * VOLATILITY * 5);
+    const close = Math.round(p);
+    const hi = Math.round(Math.max(open, close) + Math.random() * p * 0.0004);
+    const lo = Math.round(Math.min(open, close) - Math.random() * p * 0.0004);
+    return {
+      price: close,
+      time: now - (80 - i) * TICK_MS,
+      open,
+      high: hi,
+      low: lo,
+      close,
+    };
+  });
 }
 
-export function useSimulation(
-  marketId: string,
-  connected: boolean,
-  liveMarkPrice?: number,
-  liveIndexPrice?: number,
-) {
-  const userIdRef = useRef<string>("");
-  const basePrice = getBasePrice(marketId);
+// ─── Hook interface ───────────────────────────────────────────────────────────
 
+interface UseSimulationOptions {
+  /** Live midpoint price from WS — overrides sim random walk when set */
+  liveMarkPrice?: number | null;
+  /** Whether the WS backend is connected */
+  connected?: boolean;
+}
+
+export function useSimulation(opts: UseSimulationOptions = {}) {
+  const { liveMarkPrice, connected = false } = opts;
+
+  const userId = useRef<string>("");
+  const trendRef = useRef(0);
+  const markRef = useRef(INITIAL_PRICE);
+
+  // Initialise userId once (client-side only)
   useEffect(() => {
-    userIdRef.current = getOrCreateUserId();
+    userId.current = getUserId();
   }, []);
 
-  const [demo, setDemo] = useState<DemoState>(() => initialState(basePrice));
-  // markPriceRef drives all intervals — always up to date regardless of state cycle
-  const markPriceRef = useRef(basePrice);
-  const trendRef = useRef(0);
-
+  const [demo, setDemo] = useState<DemoState>(initialState);
   const [orderbook, setOrderbook] = useState(() =>
-    buildSyntheticOrderbook(basePrice),
+    buildSyntheticOrderbook(INITIAL_PRICE),
   );
   const [priceHistory, setPriceHistory] = useState(() =>
-    seedHistory(basePrice),
+    initialHistory(Date.now()),
   );
-
   const [orderError, setOrderError] = useState<string | null>(null);
   const [lastOrderFlash, setLastOrderFlash] = useState<"buy" | "sell" | null>(
     null,
   );
   const [liquidated, setLiquidated] = useState(false);
-  const [orderToast, setOrderToast] = useState<{
-    msg: string;
-    type: "success" | "error" | "pending";
-  } | null>(null);
+  const [fundingRate, setFundingRate] = useState(0);
 
-  const showToast = useCallback(
-    (msg: string, type: "success" | "error" | "pending") => {
-      setOrderToast({ msg, type });
-      setTimeout(() => setOrderToast(null), 3500);
-    },
-    [],
-  );
-
-  // ── When market changes, re-seed everything with correct base price ────────
-  // Use a ref to track previous marketId so we only reset on actual change
-  const prevMarketRef = useRef(marketId);
+  // ── Sync liveMarkPrice into demo state ──────────────────────────────────────
   useEffect(() => {
-    if (prevMarketRef.current === marketId) return;
-    prevMarketRef.current = marketId;
+    if (!connected || liveMarkPrice == null) return;
+    markRef.current = liveMarkPrice;
+    setDemo((prev) => {
+      const index = nextIndexPrice(liveMarkPrice, prev.indexPrice);
+      // Liquidation check against live price
+      if (prev.position) {
+        const mr = marginRatio(prev.position, liveMarkPrice);
+        if (mr <= 0.05) {
+          setLiquidated(true);
+          setTimeout(() => setLiquidated(false), 4_000);
+          return {
+            ...prev,
+            position: null,
+            markPrice: liveMarkPrice,
+            indexPrice: index,
+            trades: [
+              {
+                id: crypto.randomUUID(),
+                side:
+                  prev.position.side === "Long"
+                    ? ("Sell" as const)
+                    : ("Buy" as const),
+                price: liveMarkPrice,
+                qty: prev.position.size,
+                timestamp: Date.now(),
+                pnl: -prev.position.margin,
+              },
+              ...prev.trades,
+            ].slice(0, 100),
+          };
+        }
+      }
+      return { ...prev, markPrice: liveMarkPrice, indexPrice: index };
+    });
+  }, [liveMarkPrice, connected]);
 
-    const bp = getBasePrice(marketId);
-    markPriceRef.current = bp;
-    trendRef.current = 0;
-    setDemo(initialState(bp));
-    setOrderbook(buildSyntheticOrderbook(bp));
-    setPriceHistory(seedHistory(bp));
-    setOrderError(null);
-    setLiquidated(false);
-  }, [marketId]);
-
-  // ── Sync live prices from WS — only when meaningfully different ──────────
-  // Guard: only update if the incoming price is >0 and actually different
-  const lastSyncedMarkRef = useRef<number>(0);
+  // ── Sim tick loop (runs always; price ignored when live) ───────────────────
   useEffect(() => {
-    if (!connected) return;
-    if (!liveMarkPrice || liveMarkPrice <= 0) return;
-    if (Math.abs(liveMarkPrice - lastSyncedMarkRef.current) < 0.01) return;
-
-    lastSyncedMarkRef.current = liveMarkPrice;
-    markPriceRef.current = liveMarkPrice;
-
-    setDemo((prev) => ({
-      ...prev,
-      markPrice: liveMarkPrice,
-      indexPrice: liveIndexPrice ?? prev.indexPrice,
-    }));
-  }, [connected, liveMarkPrice, liveIndexPrice]);
-
-  // ── Sim price tick — only when NOT connected ──────────────────────────────
-  useEffect(() => {
-    if (connected) return;
-
-    const bp = getBasePrice(marketId);
-    // If markPriceRef drifted to wrong market base during switch, re-anchor it
-    if (Math.abs(markPriceRef.current - bp) > bp * 0.5) {
-      markPriceRef.current = bp;
-    }
-
     const priceId = setInterval(() => {
+      if (connected && liveMarkPrice != null) return; // driven by WS instead
+
       setDemo((prev) => {
         const mark = nextMarkPrice(
           prev.markPrice,
@@ -174,260 +181,238 @@ export function useSimulation(
           trendRef.current * 0.00003,
         );
         const index = nextIndexPrice(mark, prev.indexPrice);
-        // Mean reversion toward current market base (not hardcoded 65000)
-        trendRef.current = ((bp - mark) / bp) * 10;
-        markPriceRef.current = mark;
+        trendRef.current = ((INITIAL_PRICE - mark) / INITIAL_PRICE) * 10;
+        markRef.current = mark;
 
-        if (prev.position && marginRatio(prev.position, mark) <= 0.05) {
-          setLiquidated(true);
-          setTimeout(() => setLiquidated(false), 4000);
-          return {
-            ...prev,
-            position: null,
-            markPrice: mark,
-            indexPrice: index,
-            trades: [
-              {
-                id: crypto.randomUUID(),
-                side: prev.position.side === "Long" ? "Sell" : "Buy",
-                price: mark,
-                qty: prev.position.size,
-                timestamp: Date.now(),
-                pnl: -prev.position.margin,
-              } as SimTrade,
-              ...prev.trades,
-            ].slice(0, 100),
-          };
+        if (prev.position) {
+          const mr = marginRatio(prev.position, mark);
+          if (mr <= 0.05) {
+            setLiquidated(true);
+            setTimeout(() => setLiquidated(false), 4_000);
+            return {
+              ...prev,
+              position: null,
+              markPrice: mark,
+              indexPrice: index,
+              trades: [
+                {
+                  id: crypto.randomUUID(),
+                  side:
+                    prev.position.side === "Long"
+                      ? ("Sell" as const)
+                      : ("Buy" as const),
+                  price: mark,
+                  qty: prev.position.size,
+                  timestamp: Date.now(),
+                  pnl: -prev.position.margin,
+                },
+                ...prev.trades,
+              ].slice(0, 100),
+            };
+          }
         }
         return { ...prev, markPrice: mark, indexPrice: index };
       });
     }, TICK_MS);
 
+    // Orderbook rebuild (sim only)
     const obId = setInterval(() => {
-      setOrderbook(buildSyntheticOrderbook(markPriceRef.current));
+      if (connected) return;
+      setOrderbook(buildSyntheticOrderbook(markRef.current));
     }, TICK_MS + 80);
+
+    // Candle history — always appends from current markRef
+    const histId = setInterval(() => {
+      const p = markRef.current;
+      setPriceHistory((ph) => {
+        const prev = ph[ph.length - 1];
+        const open = prev?.close ?? p;
+        const close = Math.round(p);
+        const hi = Math.round(
+          Math.max(open, close) + Math.random() * p * 0.0003,
+        );
+        const lo = Math.round(
+          Math.min(open, close) - Math.random() * p * 0.0003,
+        );
+        return [
+          ...ph,
+          { price: close, time: Date.now(), open, high: hi, low: lo, close },
+        ].slice(-120);
+      });
+    }, TICK_MS + 160);
 
     return () => {
       clearInterval(priceId);
       clearInterval(obId);
+      clearInterval(histId);
     };
-  }, [connected, marketId]);
+  }, [connected, liveMarkPrice]);
 
-  // ── Price history — always runs, reads from ref ───────────────────────────
-  useEffect(() => {
-    const histId = setInterval(() => {
-      const p = markPriceRef.current;
-      if (p <= 0) return; // guard: never append zero-price candles
-
-      setPriceHistory((ph) => {
-        const prev = ph[ph.length - 1];
-        const open = prev?.close ?? Math.round(p);
-        const close = Math.round(p);
-        // Only append if price has actually changed from last candle (prevents flat chart)
-        if (close === open && ph.length > 1) {
-          // Still append, but add tiny noise so chart has movement
-          const noise = Math.round((Math.random() - 0.5) * p * 0.0002);
-          const noisy = Math.max(1, close + noise);
-          return [
-            ...ph,
-            {
-              price: noisy,
-              time: Date.now(),
-              open,
-              close: noisy,
-              high: Math.max(open, noisy) + 1,
-              low: Math.max(1, Math.min(open, noisy) - 1),
-            },
-          ].slice(-120);
-        }
-        return [
-          ...ph,
-          {
-            price: close,
-            time: Date.now(),
-            open,
-            close,
-            high: Math.round(
-              Math.max(open, close) + Math.random() * p * 0.0003,
-            ),
-            low: Math.max(
-              1,
-              Math.round(Math.min(open, close) - Math.random() * p * 0.0003),
-            ),
-          },
-        ].slice(-120);
-      });
-    }, TICK_MS + 160);
-    return () => clearInterval(histId);
-  }, []); // deliberately empty — reads markPriceRef directly
-
-  // ── Poll backend position when connected ──────────────────────────────────
-  // FIX: use exponential backoff after 404s to stop spam
-  const position404Count = useRef(0);
+  // ── Live position polling ──────────────────────────────────────────────────
   useEffect(() => {
     if (!connected) return;
 
-    let timeoutId: ReturnType<typeof setTimeout>;
+    let cancelled = false;
 
     const poll = async () => {
-      const uid = userIdRef.current;
-      if (!uid) {
-        timeoutId = setTimeout(poll, 2_000);
-        return;
-      }
-
+      if (!userId.current) return;
       try {
-        const pos = await api.getPosition(uid, marketId);
-        position404Count.current = 0; // reset on success
+        const pos = await api.getPosition(userId.current);
+        if (cancelled) return;
         setDemo((prev) => ({
           ...prev,
-          position: {
-            side: pos.side as "Long" | "Short",
-            size: pos.size,
-            entryPrice: pos.entry_price,
-            margin: pos.margin,
-            leverage: Math.max(1, Math.round(pos.leverage)),
-          },
+          position: pos.size > 0 ? backendToSimPosition(pos) : null,
         }));
-        timeoutId = setTimeout(poll, 2_000);
       } catch {
-        // 404 = no open position — clear it, but back off polling
-        position404Count.current += 1;
-        setDemo((prev) =>
-          prev.position === null ? prev : { ...prev, position: null },
-        );
-
-        // Back off: 2s → 4s → 8s → cap at 10s
-        const delay = Math.min(
-          10_000,
-          2_000 * Math.pow(2, Math.min(position404Count.current - 1, 3)),
-        );
-        timeoutId = setTimeout(poll, delay);
+        // position endpoint returns 404 when no position — that's fine
+        if (!cancelled) {
+          setDemo((prev) => ({ ...prev, position: null }));
+        }
       }
     };
 
-    timeoutId = setTimeout(poll, 500); // small initial delay
-    return () => clearTimeout(timeoutId);
-  }, [connected, marketId]);
+    poll();
+    const id = setInterval(poll, POSITION_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [connected]);
 
-  // ── Place order ───────────────────────────────────────────────────────────
+  // ── Live funding rate polling ──────────────────────────────────────────────
+  useEffect(() => {
+    if (!connected) return;
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const f = await api.getFundingRate();
+        if (!cancelled) setFundingRate(f.funding_rate);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    poll();
+    const id = setInterval(poll, FUNDING_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [connected]);
+
+  // ── placeOrder ─────────────────────────────────────────────────────────────
   const placeOrder = useCallback(
     async (params: OrderParams) => {
       setOrderError(null);
 
-      // ALWAYS enforce integer qty — Rust u32 rejects floats
-      const safeQty = Math.max(1, Math.floor(params.qty));
-      const safePrice =
-        params.price !== undefined ? Math.round(params.price) : undefined;
-
-      if (connected) {
-        const mark = markPriceRef.current;
-        const margin = ((safePrice ?? mark) * safeQty) / params.leverage;
-
-        if (margin > demo.balance) {
-          const err = `Insufficient balance. Need $${margin.toFixed(2)}, have $${demo.balance.toFixed(2)}`;
-          setOrderError(err);
-          showToast(`✗ ${err}`, "error");
-          return;
-        }
-
-        showToast("Sending order to engine…", "pending");
+      if (connected && userId.current) {
+        // ── LIVE: send to Rust backend ──
+        const fillPrice = params.price ?? markRef.current;
+        const margin = (fillPrice * params.qty) / params.leverage;
 
         try {
-          console.log("[order] sending to Rust:", {
-            marketId,
+          await api.placeOrder({
+            user_id: userId.current,
             side: params.side,
-            qty: safeQty,
-            price: safePrice,
+            qty: params.qty,
+            price: params.price,
             margin,
           });
-          const resp = await api.placeOrder({
-            user_id: userIdRef.current,
-            side: params.side,
-            qty: safeQty,
-            price: safePrice,
-            margin,
-            market: marketId,
-          });
-          console.log("[order] Rust response:", resp);
+          setLastOrderFlash(params.side === "Buy" ? "buy" : "sell");
+          setTimeout(() => setLastOrderFlash(null), 800);
 
-          // Reset 404 backoff after a successful order (position will appear soon)
-          position404Count.current = 0;
-
-          showToast(
-            `✓ ${params.side === "Buy" ? "Long" : "Short"} ${safeQty} @ ${marketId} — queued`,
-            "success",
-          );
-
+          // Deduct margin from local balance optimistically
           setDemo((prev) => ({
             ...prev,
             balance: Math.max(0, prev.balance - margin),
             trades: [
               {
-                id: resp.event_id,
+                id: crypto.randomUUID(),
                 side: params.side,
-                price: resp.fill_price ?? Math.round(mark),
-                qty: safeQty,
+                price: fillPrice,
+                qty: params.qty,
                 timestamp: Date.now(),
-              } as SimTrade,
+              },
               ...prev.trades,
             ].slice(0, 100),
           }));
-
-          setLastOrderFlash(params.side === "Buy" ? "buy" : "sell");
-          setTimeout(() => setLastOrderFlash(null), 800);
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : "Order failed";
-          console.error("[order] failed:", msg);
           setOrderError(msg);
-          showToast(`✗ ${msg}`, "error");
         }
       } else {
+        // ── SIM: local execution ──
         setDemo((prev) => {
-          // Clone params with safe integers for local sim too
-          const safeParams = { ...params, qty: safeQty, price: safePrice };
-          const result = executeOrder(prev, safeParams, prev.markPrice);
+          const result = executeOrder(prev, params, prev.markPrice);
           if (!result.ok) {
             setOrderError(result.error ?? "Order failed");
-            showToast(`✗ ${result.error}`, "error");
             return prev;
           }
           setLastOrderFlash(params.side === "Buy" ? "buy" : "sell");
           setTimeout(() => setLastOrderFlash(null), 800);
-          showToast(
-            `✓ ${params.side === "Buy" ? "Long" : "Short"} ${safeQty} @ $${Math.round(prev.markPrice).toLocaleString()}`,
-            "success",
-          );
           return { ...prev, ...result.newState };
         });
       }
     },
-    [connected, demo.balance, marketId, showToast],
+    [connected],
   );
 
-  // ── Close position ────────────────────────────────────────────────────────
+  // ── closePosition ──────────────────────────────────────────────────────────
   const closePosition = useCallback(async () => {
-    if (!demo.position) return;
-    const closeSide: "Buy" | "Sell" =
-      demo.position.side === "Long" ? "Sell" : "Buy";
-    await placeOrder({
-      side: closeSide,
-      qty: demo.position.size,
-      leverage: demo.position.leverage,
-    });
-  }, [demo.position, placeOrder]);
+    setDemo((prev) => {
+      if (!prev.position) return prev;
 
-  // ── Reset (balance only — keep market price intact) ───────────────────────
+      const closeSide: "Buy" | "Sell" =
+        prev.position.side === "Long" ? "Sell" : "Buy";
+
+      if (connected && userId.current) {
+        // Fire close order to backend (don't await — position poll will sync)
+        const fillPrice = markRef.current;
+        const margin = prev.position.margin;
+        api
+          .placeOrder({
+            user_id: userId.current,
+            side: closeSide,
+            qty: prev.position.size,
+            margin,
+          })
+          .catch(console.error);
+
+        setLastOrderFlash(closeSide === "Buy" ? "buy" : "sell");
+        setTimeout(() => setLastOrderFlash(null), 800);
+        return prev; // position update comes from next poll
+      }
+
+      // Sim close
+      const result = executeOrder(
+        prev,
+        {
+          side: closeSide,
+          qty: prev.position.size,
+          leverage: prev.position.leverage,
+        },
+        prev.markPrice,
+      );
+      if (!result.ok) return prev;
+      setLastOrderFlash(closeSide === "Buy" ? "buy" : "sell");
+      setTimeout(() => setLastOrderFlash(null), 800);
+      return { ...prev, ...result.newState };
+    });
+  }, [connected]);
+
+  // ── resetDemo ──────────────────────────────────────────────────────────────
   const resetDemo = useCallback(() => {
-    // DON'T reset markPriceRef — keep whatever price we have so chart doesn't jump
-    const currentMark = markPriceRef.current;
-    setDemo({ ...initialState(currentMark), markPrice: currentMark });
+    markRef.current = INITIAL_PRICE;
+    trendRef.current = 0;
+    setDemo(initialState());
     setOrderError(null);
     setLiquidated(false);
-    // Reseed history from current price so chart stays coherent
-    setPriceHistory(seedHistory(currentMark));
+    setPriceHistory(initialHistory(Date.now()));
   }, []);
 
+  // ── Derived values ─────────────────────────────────────────────────────────
   const positionStats = demo.position
     ? {
         upnl: unrealisedPnl(demo.position, demo.markPrice),
@@ -436,22 +421,23 @@ export function useSimulation(
       }
     : null;
 
-  const fundingRate =
-    (demo.markPrice - demo.indexPrice) / Math.max(demo.indexPrice, 1);
+  // Use live funding rate when connected, otherwise derive from sim prices
+  const derivedFundingRate = connected
+    ? fundingRate
+    : (demo.markPrice - demo.indexPrice) / demo.indexPrice;
 
   return {
     demo,
     orderbook,
     priceHistory,
     positionStats,
-    fundingRate,
+    fundingRate: derivedFundingRate,
     orderError,
     lastOrderFlash,
     liquidated,
-    orderToast,
     placeOrder,
     closePosition,
     resetDemo,
-    userId: userIdRef.current,
+    userId: userId.current,
   };
 }
